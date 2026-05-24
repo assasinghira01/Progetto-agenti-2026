@@ -1,6 +1,6 @@
 def main():
     
-    print("Avvio del programma...")
+    print("Avvio del programma... atteendere")
 
 if __name__ == "__main__":
 
