@@ -1,2 +1,7 @@
+def main():
+    
+    print("Avvio del programma...")
 
-print("ciao")
+if __name__ == "__main__":
+
+    main()
