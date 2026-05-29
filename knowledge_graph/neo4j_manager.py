@@ -13,7 +13,7 @@ class CucinaKnowledgeGraph:
         Ritorna un dizionario con i dettagli se trova un duplicato, altrimenti None.
         """
         query_cypher = """
-        MATCH (r:Ricetta) WHERE r.name =~ ('(?i)' + $topic)
+        MATCH (r:Ricetta) WHERE toLower(r.name) CONTAINS toLower($topic)
         OPTIONAL MATCH (r)-[:IS_VARIANTE_DI]-(padre:Concetto)-[:IS_VARIANTE_DI]-(variante:Ricetta)
         MATCH (p:Post)-[:PARLA_DI]->(collegato)
         WHERE collegato = r OR collegato = variante
@@ -49,5 +49,19 @@ class CucinaKnowledgeGraph:
                     termini_espansi.append(record["ingrediente"])
         return termini_espansi
 
+def salva_post_approvato(self, topic: str):
+        # 2. LA FUNZIONE MANCANTE: Crea il nodo Post e lo collega alla Ricetta
+        query = """
+        MERGE (r:Ricetta {name: $topic})
+        CREATE (p:Post {data: $data, titolo: $titolo})
+        CREATE (p)-[:PARLA_DI]->(r)
+        """
+        with self.driver.session() as session:
+            session.run(query, 
+                        topic=topic, 
+                        data=datetime.now().strftime("%Y-%m-%d"), 
+                        titolo=f"Post su {topic}")
+
+                        
 # Esportiamo l'istanza pronta all'uso
 kg_client = CucinaKnowledgeGraph("bolt://localhost:7687", "neo4j", "password")

@@ -1,10 +1,22 @@
-langgraph>=0.0.1
-langchain-core>=0.2.0
-langchain-openai>=0.1.0
-langchain-chroma>=0.1.0
-langchain-huggingface>=0.0.1
-datasets>=2.15.0
-neo4j>=5.15.0
-python-dotenv>=1.0.0
-sentence-transformers>=2.2.2
-pydantic>=2.0.0
+# --- CORE ARCHITETTURA ---
+langgraph
+langchain-core
+langchain-openai
+langchain-community
+pydantic
+
+# --- RICERCA WEB ---
+tavily-python
+
+# --- DATABASE VETTORIALE E RAG ---
+langchain-chroma
+langchain-huggingface
+sentence-transformers
+datasets
+
+# --- KNOWLEDGE GRAPH ---
+neo4j
+
+# --- UTILITY E DEBUG ---
+python-dotenv
+langsmith

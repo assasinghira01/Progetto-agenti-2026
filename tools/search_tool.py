@@ -1,6 +1,8 @@
 import os
 from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_core.tools import tool
 
+@tool
 def esegui_ricerca_web(query: str) -> str:
     """Cerca su Internet informazioni, varianti e trend culinari legati al topic."""
     tool_tavily = TavilySearchResults(max_results=2)

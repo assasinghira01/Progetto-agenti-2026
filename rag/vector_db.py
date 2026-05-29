@@ -1,9 +1,13 @@
 from langchain_chroma import Chroma
 from datasets import load_dataset
 from langchain_core.documents import Document
-from config import EMBEDDINGS  # Importiamo l'embedding dal config
+
 import os
 DB_DIR = "./chroma_db_cucina"
+
+EMBEDDINGS = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
 
 def inizializza_vector_db():
     
@@ -60,13 +64,3 @@ def inizializza_vector_db():
     print("Vector DB pronto!")
     return vector_store
 
-def cerca_ricetta_nel_db(query: str, k: int = 1):
-    vector_store = Chroma(
-        persist_directory=DB_DIR,
-        embedding_function=EMBEDDINGS 
-    )
-    risultati = vector_store.similarity_search(query, k=k)
-    
-    if risultati:
-         return risultati[0].metadata.get("payload")
-    return "Nessuna ricetta trovata nel DB vettoriale."

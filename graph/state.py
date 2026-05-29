@@ -1,13 +1,15 @@
-from typing import List, Optional
+import operator
+from typing import List, Optional,Annotated
+
 from langgraph.graph import MessagesState
 
 class Blog_Cucina(MessagesState):
     input_utente: str
-    topic_corrente: Optional[str]
-    kg_context: List[str]                
-    rag_documents: List[str]              
-    post_draft: Optional[str]
-    web_documents: List[str]              
-    post_draft: Optional[str]
-    is_valid: bool           
-    user_approval: str
+    topic_corrente: Optional[str] = None
+    kg_context: Annotated[List[str], operator.add]    
+    rag_documents: Annotated[List[str], operator.add]
+    web_documents: Annotated[List[str], operator.add]
+    post_draft: Optional[str] = None                 
+    is_valid: Optional[bool] = None                   
+    user_approval: Optional[str] = None
+    human_feedback: Optional[str] = None 

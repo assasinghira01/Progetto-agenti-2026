@@ -3,13 +3,12 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEmbeddings
 from pydantic import BaseModel, Field
+from tools.search_tool import esegui_ricerca_web
+from tools.rag_tool import cerca_ricetta_nel_db
+from tools.kg_tool import controlla_storico_post
 
 load_dotenv()
 
-# Embedding locale
-EMBEDDINGS = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-)
 
 # Agente intelligente OpenAI
 llm = ChatOpenAI(
@@ -18,8 +17,15 @@ llm = ChatOpenAI(
     max_tokens=600
 )
 
-# Schema di output
-class TopicExtraction(BaseModel):
-    topic: str = Field(description="Il nome del piatto o ingrediente principale richiesto.")
 
-llm_structured = llm.with_structured_output(TopicExtraction)
+# --- IL BINDING DEGLI STRUMENTI (Pattern MCP) ---
+# Impacchettiamo i nostri 3 strumenti obbligatori
+lista_tools = [
+    esegui_ricerca_web, 
+    cerca_ricetta_nel_db, 
+    controlla_storico_post
+]
+
+# 2. Creiamo un "Super-Cervello" dotato di mani.
+# llm_con_tools è la variabile che useremo nel nostro Nodo di Ricerca!
+llm_con_tools = llm.bind_tools(lista_tools)
