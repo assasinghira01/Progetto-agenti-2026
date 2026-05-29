@@ -17,11 +17,11 @@ def router_ricerca(state: Blog_Cucina):
     
     # Se l'LLM ha richiesto l'uso di uno strumento (es. ha chiamato cerca_ricetta_nel_db)
     if hasattr(ultimo_messaggio, "tool_calls") and ultimo_messaggio.tool_calls:
-        print(f"🛠️  L'Agente sta usando i tool: {[t['name'] for t in ultimo_messaggio.tool_calls]}")
+        print(f"  L'Agente sta usando i tool: {[t['name'] for t in ultimo_messaggio.tool_calls]}")
         return "tools"
     
     # Se non ha chiamato tool, significa che ha finito di raccogliere dati
-    print("✅ L'Agente ha concluso la ricerca. Passo al validatore.")
+    print(" L'Agente ha concluso la ricerca. Passo al validatore.")
     return "validator"
 
 

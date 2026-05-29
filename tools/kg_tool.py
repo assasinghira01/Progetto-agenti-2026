@@ -24,12 +24,29 @@ def controlla_storico_post(topic: str) -> str:
         topic: Il nome del piatto da controllare.
     """
     try:
-        # Questa è la funzione Cypher che naviga le relazioni (che hai in neo4j_manager.py)
-        # Supponiamo che restituisca una stringa formattata con lo storico
         risultato = kg_client.controlla_cronologia_post(topic)
         
         if risultato:
-            return f"STORICO TROVATO:\n{risultato}"
-        return f"Nessun post precedente trovato per '{topic}' o le sue varianti. Puoi procedere."
+            # Creiamo il messaggio severo per l'LLM
+            messaggio = (f" STOP! Il piatto '{topic}' è GIÀ PRESENTE nel database "
+                         f"(Titolo esistente: '{risultato['titolo_post']}'). "
+                         f"REQUISITO DI SISTEMA: È severamente vietato scrivere un post identico. "
+                         f"DEVI obbligatoriamente cercare e scrivere una VARIANTE (es. '{topic} al forno').")
+            
+            # STAMPIAMO a schermo per te (così lo vedi nel terminale!)
+            print(f"\n [TOOL NEO4J] {messaggio}")
+            
+            # RITORNIAMO all'LLM
+            return messaggio
+            
+        # Se è un piatto nuovo:
+        messaggio_ok = f"Nessun post precedente trovato per '{topic}'. Puoi procedere con la ricetta classica."
+        
+        # Stampiamo a schermo per te e poi diamo il via libera all'LLM
+        print(f"\n [TOOL NEO4J]  {messaggio_ok}")
+        return messaggio_ok
+        
     except Exception as e:
-        return f"Errore di connessione a Neo4j: {str(e)}"
+        errore = f"Errore di connessione a Neo4j: {str(e)}"
+        print(f"\n [TOOL NEO4J]  {errore}")
+        return errore

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
-
+from tools.kg_tool import kg_client
 from config import llm, llm_con_tools
 from graph.state import Blog_Cucina
 
@@ -24,7 +24,7 @@ def planner_node(state: Blog_Cucina):
     risultato = llm_structured.invoke([HumanMessage(content=f"Estrai il topic: {input_utente}")])
     topic_estratto = risultato.topic.capitalize()
     
-    print(f"🎯 Topic identificato: {topic_estratto}")
+    print(f" Topic identificato: {topic_estratto}")
     
     # 2. Scriviamo il topic nello stato e passiamo la palla al nodo di ricerca
     return {"topic_corrente": topic_estratto}
@@ -40,10 +40,7 @@ def krag_research_node(state: Blog_Cucina):
     if not messaggi:
         sys_msg = SystemMessage(content=f"""Sei l'investigatore del blog culinario.
         Il tuo compito è raccogliere TUTTE le informazioni necessarie sul piatto: '{topic}'.
-        Hai a disposizione degli strumenti. Usali in quest'ordine:
-        1. Controlla lo storico per non fare doppioni (kg_tool).
-        2. Cerca le dosi esatte nel DB locale (rag_tool).
-        3. Cerca curiosità su internet (search_tool).
+        Hai a disposizione degli strumenti. Usa solo come strumento controlla_storico_post e non usare gli altri.
         
         Usa i tool finché non hai raccolto tutto. Quando sei soddisfatto, 
         rispondi semplicemente con un riassunto dei dati trovati.
@@ -72,7 +69,7 @@ def validator_node(state: Blog_Cucina):
     {dati_raccolti}
     
     COMPITO:
-    1. Verifica se la richiesta dell'utente ha senso logico e gastronomico (es. abbinamenti assurdi come pesce e dolci cremosi vanno bocciati).
+    1. Verifica se la richiesta dell'utente ha senso logico e gastronomico (es. abbinamenti assurdi di ingredienti).
     2. Controlla se i dati raccolti contengono le informazioni minime per scrivere una ricetta (ingredienti e passaggi base).
     
     Se la richiesta è un'assurdità o mancano i dati fondamentali, imposta is_valid=False. Altrimenti imposta True.
@@ -135,7 +132,7 @@ def kg_update_node(state: Blog_Cucina):
     
     # Diciamo al Knowledge Graph di registrare ufficialmente il post!
     # (Presuppone che tu abbia creato una funzione simile in neo4j_manager.py)
-    # kg_client.salva_post_approvato(topic) 
+    kg_client.salva_post_approvato(topic) 
     
     print(f" STORICO AGGIORNATO: Il post su '{topic}' è stato salvato nel Grafo di Neo4j!")
     return {}

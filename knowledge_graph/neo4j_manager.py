@@ -1,4 +1,5 @@
 from neo4j import GraphDatabase
+from datetime import datetime
 
 class CucinaKnowledgeGraph:
     def __init__(self, uri, user, password):
@@ -49,7 +50,7 @@ class CucinaKnowledgeGraph:
                     termini_espansi.append(record["ingrediente"])
         return termini_espansi
 
-def salva_post_approvato(self, topic: str):
+    def salva_post_approvato(self, topic: str):
         # 2. LA FUNZIONE MANCANTE: Crea il nodo Post e lo collega alla Ricetta
         query = """
         MERGE (r:Ricetta {name: $topic})
@@ -61,6 +62,8 @@ def salva_post_approvato(self, topic: str):
                         topic=topic, 
                         data=datetime.now().strftime("%Y-%m-%d"), 
                         titolo=f"Post su {topic}")
+            
+        print(f"DEBUG NEO4J: Salvataggio di '{topic}' completato con successo.")
 
                         
 # Esportiamo l'istanza pronta all'uso
