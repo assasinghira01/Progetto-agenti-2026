@@ -2,47 +2,117 @@ import uuid
 import os
 from dotenv import load_dotenv
 
+# 1. Caricamento immediato delle variabili d'ambiente (api key, credenziali db)
+load_dotenv()
+
+from rag.vector_db import inizializza_vector_db
 from graph.workflow import app
 from langgraph.types import Command
 
-load_dotenv()
 
 def main():
-    print(" Benvenuto nell'AI Food Blogger Copilot!")
-    print("------------------------------------------")
-    richiesta = input("Di cosa vorresti parlare oggi? (es. 'Scrivi un post sulla caponata'):\n> ")
-    
-   # 1. Creiamo un ID di sessione.
+    print("====================================================")
+    print(" 🍳 AI Food Blogger Copilot - Sistema K-RAG + HITL ")
+    print("====================================================")
+
+    # Inizializziamo o carichiamo il database vettoriale locale
+    inizializza_vector_db()
+
+    richiesta = input(
+        "\nDi cosa vorresti parlare oggi? (es. 'Scrivi un post sulla caponata'):\n> "
+    )
+    if not richiesta.strip():
+        print("Input vuoto. Terminazione del programma.")
+        return
+
+    # Creiamo un ID di sessione univoco (Thread) per mantenere attiva la memoria del grafo
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
-    
-    print("\n Avvio del ragionamento dell'Agente...\n")
-    # 2. Avviamo il grafo. Girerà in automatico passando da Planner, Research, Validatore e Writer.
-    for event in app.stream({"input_utente": richiesta}, config):
-        # Stampa a schermo i nomi dei nodi mano a mano che vengono eseguiti
-        for nome_nodo, stato_ritornato in event.items():
-            pass # I print dettagliati sono già dentro i nostri file nodes.py
-            
-    # 3. INTERRUZIONE UMANA (Il grafo è in pausa)
-    stato_grafo = app.get_state(config)
-    
-    # Se .next contiene qualcosa, significa che il grafo non è finito (è bloccato al nodo 'human_review')
-    if stato_grafo.next:
-        print("\n Il sistema è in pausa. In attesa di approvazione umana!")
-        
-        # Chiediamo all'utente cosa ne pensa della bozza stampata a schermo
-        feedback_utente = input("\n Il tuo verdetto (es. 'Approvo', oppure 'Mettici meno sale'):\n> ")
-        
-        print("\n Ripresa dell'esecuzione...\n")
-        
-        # 4. RIPRESA DEL GRAFO. Usiamo 'Command' per rimettere in moto l'agente 
-        # iniettando la risposta dell'utente direttamente nel nodo in pausa.
-        for event in app.stream(Command(resume=feedback_utente), config):
-             for nome_nodo, stato_ritornato in event.items():
-                 pass
 
-    print("\n Processo completato! Il post è stato salvato.")
-    print(" Puoi vedere l'albero decisionale completo sulla tua dashboard di LangSmith.")
+    print("\n🚀 Avvio del flusso di lavoro dell'Agente...\n")
+
+    # --- PRIMO AVVIO DEL GRAFO ---
+    # Girerà finché non incontra la FINE o un punto di interruzione (interrupt)
+    for event in app.stream({"input_utente": richiesta}, config):
+        for nome_nodo, var_modificate in event.items():
+            print(f"[LOG GRAFO] Il nodo '{nome_nodo}' ha terminato l'esecuzione.")
+            # Se il nodo ha estratto il topic, lo mostriamo subito come feedback
+            if "topic_corrente" in var_modificate:
+                print(f"Topic identificato: {var_modificate['topic_corrente']}")
+        pass  # I log dettagliati di avanzamento sono stampati internamente dai nodi
+
+    # --- LOOP DINAMICO DI GESTIONE INTERRUPT ---
+    # Gestisce n interruzioni consecutive (scelta variante -> validazione -> revisione finale)
+    while True:
+        stato_grafo = app.get_state(config)
+
+        # Se non ci sono nodi successivi nella coda (.next), il grafo ha concluso la sua esecuzione
+        if not stato_grafo.next:
+            break
+
+        print("\n[SISTEMA IN PAUSA] Rilevato punto di interruzione Human-in-the-Loop.")
+
+        # Estraggiamo i dati correnti memorizzati nello stato del thread
+        valori_stato = stato_grafo.values
+        bozza_articolo = valori_stato.get("post_draft")
+        messaggi = valori_stato.get("messages", [])
+
+        # STRATEGIA DI DISCRIMINAZIONE DELL'INTERRUPT:
+        # Se nello stato NON è ancora presente la bozza dell'articolo, siamo fermi alla scelta della variante!
+        if not bozza_articolo:
+            ultimo_messaggio_agente = (
+                messaggi[-1].content if messaggi else "Nessuna opzione visualizzabile."
+            )
+            print("\n----------------------------------------------------")
+            print("L'AGENTE CHIEDE DI SCEGLIERE UNA VARIANTE STORICA:")
+            print("----------------------------------------------------")
+            print(ultimo_messaggio_agente)
+
+            feedback_utente = input(
+                "\nQuale variante decidi di sviluppare? (Digita la tua scelta):\n> "
+            )
+
+        # Se la bozza è presente, significa che abbiamo superato la ricerca e siamo alla revisione finale del testo!
+        else:
+            print("\n----------------------------------------------------")
+            print("BOZZA FINALE GENERATA DALL'LLM PER IL TUO BLOG:")
+            print("----------------------------------------------------")
+            print(bozza_articolo)
+            print("----------------------------------------------------")
+
+            feedback_utente = input(
+                "\nInserisci il tuo verdetto (es. 'Approvo', oppure indica le modifiche):\n> "
+            )
+
+        print("\nRipresa dell'esecuzione con l'input fornito...\n")
+
+        # Risvegliamo il grafo inviando il comando di sblocco (resume) con il feedback dell'utente
+        for event in app.stream(Command(resume=feedback_utente), config):
+            for nome_nodo, var_modificate in event.items():
+                print(f"[LOG GRAFO] Ripresa attività. Eseguito nodo: '{nome_nodo}'")
+            pass
+
+    # --- CONCLUSIONE DEL FLUSSO ---
+    # Recuperiamo lo stato finale per stampare l'esito definitivo dell'elaborazione
+    stato_finale = app.get_state(config)
+    post_finale = stato_finale.values.get("post_draft")
+
+    if post_finale:
+        print("\n==============================================")
+        print("PROCESSO COMPLETATO CON SUCCESSO!")
+        print("==============================================")
+        print(
+            "Il post è stato ufficialmente validato, approvato e memorizzato nel grafo Neo4j."
+        )
+        print("Ottimo lavoro!")
+    else:
+        print("\n==============================================")
+        print(" FLUSSO TERMINATO SENZA PUBBLICAZIONE")
+        print("==============================================")
+        print("Il processo è stato interrotto  del Validatore per incoerenza dei dati.")
+
+    print(" resta sempre collegato con noi !!.")
+
 
 if __name__ == "__main__":
     main()

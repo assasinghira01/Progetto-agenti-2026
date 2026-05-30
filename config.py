@@ -11,20 +11,12 @@ load_dotenv()
 
 
 # Agente intelligente OpenAI
-llm = ChatOpenAI(
-    model="gpt-4o-mini", 
-    temperature=0.1,
-    max_tokens=1000
-)
+llm = ChatOpenAI(model="gpt-4o", temperature=0.1, max_tokens=600)
 
 
 # --- IL BINDING DEGLI STRUMENTI (Pattern MCP) ---
 # Impacchettiamo i nostri 3 strumenti obbligatori
-lista_tools = [
-    esegui_ricerca_web, 
-    cerca_ricetta_nel_db, 
-    controlla_storico_post
-]
+lista_tools = [esegui_ricerca_web, cerca_ricetta_nel_db, controlla_storico_post]
 
 # 2. Creiamo un "Super-Cervello" dotato di mani.
 # llm_con_tools è la variabile che useremo nel nostro Nodo di Ricerca!

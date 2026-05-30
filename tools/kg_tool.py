@@ -27,26 +27,26 @@ def controlla_storico_post(topic: str) -> str:
         risultato = kg_client.controlla_cronologia_post(topic)
         
         if risultato:
-            # Creiamo il messaggio severo per l'LLM
-            messaggio = (f" STOP! Il piatto '{topic}' è GIÀ PRESENTE nel database "
-                         f"(Titolo esistente: '{risultato['titolo_post']}'). "
-                         f"REQUISITO DI SISTEMA: È severamente vietato scrivere un post identico. "
-                         f"DEVI obbligatoriamente cercare e scrivere una VARIANTE (es. '{topic} al forno').")
             
-            # STAMPIAMO a schermo per te (così lo vedi nel terminale!)
-            print(f"\n [TOOL NEO4J] {messaggio}")
+            messaggio = (
+                f"[TOOL NEO4J] STOP DI SISTEMA! Il piatto '{topic}' è GIÀ PRESENTE nel database "
+                f"(Titolo post esistente: '{risultato['titolo_post']}'). "
+                f"REQUISITO DI SISTEMA: È severamente vietato procedere autonomamente o inventare ricette. "
+                f"DEVI ASSOLUTAMENTE FERMARTI qui. Formula un messaggio per l'utente in cui proponi "
+                f"3 varianti creative e alternative (es. varianti al forno, regionali o ingredienti diversi) "
+                f"e chiedigli esplicitamente quale preferisce esplorare, inserendo un punto di domanda."
+            )
             
-            # RITORNIAMO all'LLM
+            # Stampiamo a schermo per te nel terminale
+            print(f"\n[TOOL NEO4J] Rilevato duplicato! Blocco l'agente e gli ordino di proporre varianti.")
             return messaggio
             
         # Se è un piatto nuovo:
-        messaggio_ok = f"Nessun post precedente trovato per '{topic}'. Puoi procedere con la ricetta classica."
-        
-        # Stampiamo a schermo per te e poi diamo il via libera all'LLM
-        print(f"\n [TOOL NEO4J]  {messaggio_ok}")
+        messaggio_ok = f"Nessun post precedente trovato per '{topic}'. Puoi procedere liberamente."
+        print(f"\n[TOOL NEO4J] Via libera per '{topic}'.")
         return messaggio_ok
         
     except Exception as e:
         errore = f"Errore di connessione a Neo4j: {str(e)}"
-        print(f"\n [TOOL NEO4J]  {errore}")
+        print(f"\n[TOOL NEO4J] {errore}")
         return errore
