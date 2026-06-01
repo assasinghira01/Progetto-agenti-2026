@@ -1,1 +1,9 @@
 .env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+*.sqlite3
+*.bin
+chroma_db_cucina/
