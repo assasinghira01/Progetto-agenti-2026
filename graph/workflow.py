@@ -5,11 +5,11 @@ from graph.state import Blog_Cucina
 from graph.nodes import (
     planner_node,
     krag_research_node,
-    human_variant_node,
     writer_node,
     validator_node,
     human_review_node,
     kg_update_node,
+    aggiorna_topic_node,
 )
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import ToolNode
@@ -32,15 +32,21 @@ def router_ricerca(state: Blog_Cucina):
         )
         return "tools"
 
-    if (
-        "?" in ultimo_messaggio.content
-        and "variante" in ultimo_messaggio.content.lower()
-    ):
-        return "human_variant"
-
     # Se non ha chiamato tool, significa che ha finito di raccogliere dati
     print(" L'Agente ha concluso la ricerca. Passo al validatore.")
     return "validator"
+
+
+def after_tools(state: Blog_Cucina):
+    """
+    Dopo l'esecuzione dei tool, decide se aggiornare il topic (se è stato chiamato chiedi_variante)
+    o tornare direttamente all'agente.
+    """
+    ultimo_messaggio = state["messages"][-1]
+    # Verifica se l'ultimo tool eseguito è chiedi_variante
+    if hasattr(ultimo_messaggio, "name") and ultimo_messaggio.name == "chiedi_variante":
+        return "aggiorna_topic"
+    return "research"
 
 
 def check_validation(state: Blog_Cucina):
@@ -70,12 +76,12 @@ builder = StateGraph(Blog_Cucina)
 # Registrazione dei nodi
 builder.add_node("planner", planner_node)
 builder.add_node("research", krag_research_node)
-builder.add_node("human_variant", human_variant_node)
 builder.add_node("validator", validator_node)
 builder.add_node("writer", writer_node)
 builder.add_node("human_review", human_review_node)
 builder.add_node("kg_update", kg_update_node)
 builder.add_node("tools", nodo_strumenti)
+builder.add_node("aggiorna_topic", aggiorna_topic_node)
 
 # Definizione degli archi standard
 builder.add_edge(START, "planner")
@@ -84,12 +90,17 @@ builder.add_edge("planner", "research")
 builder.add_conditional_edges(
     "research",
     router_ricerca,
-    {"tools": "tools", "validator": "validator", "human_variant": "human_variant"},
+    {"tools": "tools", "validator": "validator"},
 )
 
+builder.add_conditional_edges(
+    "tools",
+    after_tools,
+    {"aggiorna_topic": "aggiorna_topic", "research": "research"},
+)
 
-builder.add_edge("tools", "research")
-builder.add_edge("human_variant", "research")
+builder.add_edge("aggiorna_topic", "research")
+
 
 # Definizione dell'arco condizionale dal validatore
 builder.add_conditional_edges(

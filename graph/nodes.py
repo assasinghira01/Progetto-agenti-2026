@@ -48,77 +48,90 @@ def krag_research_node(state: Blog_Cucina):
     topic = state["topic_corrente"]
     messaggi = state.get("messages", [])
 
-    # Se è la prima volta che entriamo nel nodo, diamo all'agente le istruzioni
+    istruzioni_mcp = SystemMessage(content=f"""
+    Sei l'agente investigatore del blog di cucina, nel nsotro blog parleremo di ricette, sagre eventi ecc. Il topic ATTUALE su cui devi lavorare è: '{topic}'.
+    
+    REGOLE DI COMPORTAMENTO (rispettale rigorosamente in ordine):
+    1. **Prima azione assoluta verifica che il post non sia gia stato pubblicato**: chiama 'controlla_storico_post' su '{topic}'.
+    
+    2. Analizza la risposta del Knowledge Graph:
+       - Se inizia con "BLOCCATO": significa che il post è già stato pubblicato di recente.
+       
+         → Chiama 'krag_suggerisci_varianti'  se parliamo di ricette per ottenere gli ingredienti base e 3 varianti creative.
+         → Dopo aver ricevuto le varianti, chiama IMMEDIATAMENTE 'chiedi_variante' passando le 3 opzioni all'utente.
+         → FERMATI. Non invocare altri tool.
+        
+       
+       - Se inizia con "OK": significa che il post è nuovo. Devi raccogliere le informazioni seguendo questo esatto flusso di ragionamento (Thought -> Action):
+         
+            Sai che il nostro database locale contiene solo ricette quindi non troverai nulla su sagre, eventi ecc. Effetua la ricerca su DB LOCALE usando 'cerca_ricetta_nel_db' solo se parliamo di ricette. Nel caso in cui
+            L'utente richieda varianti o modifiche delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web".
+            
+           Nel caso in cui l'utente non parli di ricette non chiamare 'cerca_ricetta_nel_db' e vai direttamente con 'esegui_ricerca_web' per raccogliere informazioni di contesto sul '{topic}' in questione.
+         
+         
+    
+    3. Se ricevi "ERRORE" o "KRAG_ERRORE", segnala immediatamente il problema all'utente e chiedi istruzioni.
+    """)
+
     if not messaggi:
-        sys_msg = SystemMessage(content=f"""Sei l'investigatore del blog culinario.
-        Il tuo compito è raccogliere TUTTE le informazioni necessarie sul piatto: '{topic}'.
-        
-        REGOLE:
-        La primissima azione che DEVI compiere è chiamare lo strumento 'controlla_storico_post' 
-        per verificare se abbiamo già parlato di '{topic}'. Non usare altri strumenti prima di questo.
-        
-        DOPO aver letto la risposta dello storico di Neo4j:
-        1. Se il piatto è GIA' STATO PUBBLICATO: FERMATI. NON usare altri tool (non cercare sul web o nel DB). 
-           Rispondi all'utente proponendo 3 varianti creative e alternative e chiedigli esplicitamente 
-           quale preferisce esplorare, inserendo un punto di domanda.
-        2. Se il piatto è NUOVO (o se l'utente ha già scelto la variante al turno precedente): 
-           Usa contemporaneamente gli altri tuoi tools 'cerca_ricetta_nel_db' e 'esegui_ricerca_web'.
-           
-        Usa i tool finché non hai raccolto tutto quello che serve per le regole sopra.
-        """)
-        messaggi = [sys_msg, HumanMessage(content=f"Inizia la ricerca per: {topic}")]
+        messaggi_da_inviare = [
+            istruzioni_mcp,
+            HumanMessage(content=f"Inizia la ricerca per: {topic}"),
+        ]
+    else:
+        messaggi_da_inviare = messaggi + [istruzioni_mcp]
 
-    # L'LLM decide autonomamente se chiamare un tool o se ha finito
-    risposta_llm = llm_con_tools.invoke(messaggi)
-
-    # Restituiamo il messaggio. Se l'LLM ha deciso di usare un tool,
-    # questo messaggio conterrà una richiesta speciale (tool_calls)
+    risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
     return {"messages": [risposta_llm]}
-
-
-def human_variant_node(state: Blog_Cucina):
-    print("\n L'Agente attende la scelta della variante...")
-
-    # L'interruzione avviene qui, in modo sicuro all'interno del nodo
-    scelta_variante = interrupt("Quale variante scegli? ")
-
-    print(f"Variante selezionata dall'utente: '{scelta_variante}'")
-
-    # Ritorniamo i dati aggiornati: ora LangGraph li salverà permanentemente nello Stato!
-    return {
-        "messages": [
-            HumanMessage(
-                content=f"Scelgo questa variante: {scelta_variante}. Procedi con la ricerca su questa variante."
-            )
-        ],
-        "topic_corrente": scelta_variante,  # Sovrascriviamo il topic con la variante!
-    }
 
 
 def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
     topic = state["topic_corrente"]
 
-    # NOVITÀ: Estraiamo TUTTO quello che i Tool (DB, Web, Neo4j) hanno trovato
     # pescando i messaggi di tipo "tool" dalla cronologia dell'Agente.
-    dati_raccolti = "\n\n".join(
-        [
-            m.content
-            for m in state["messages"]
-            if hasattr(m, "type") and m.type == "tool"
-        ]
+    dati_db_locale = []
+    dati_web = []
+
+    # Cicliamo sui messaggi per estrarre il contenuto in base al tool che l'ha generato
+    for m in state["messages"]:
+        if hasattr(m, "type") and m.type == "tool":
+            nome_tool = getattr(m, "name", "")
+
+            if nome_tool == "cerca_ricetta_nel_db":
+                if "Nessuna ricetta" not in m.content:
+                    dati_db_locale.append(m.content)
+
+            elif nome_tool == "esegui_ricerca_web":
+                dati_web.append(m.content)
+
+    testo_db = (
+        "\n".join(dati_db_locale)
+        if dati_db_locale
+        else "NESSUNA RICETTA TROVATA NEL DB LOCALE"
     )
+    testo_web = "\n".join(dati_web) if dati_web else "NESSUN DATO COLLATERALE DAL WEB"
 
     prompt = f"""Analizza la fattibilità editoriale per il piatto: '{topic}'.
     
     DATI RACCOLTI DAGLI STRUMENTI (DB Locale e Web):
-    {dati_raccolti}
+     
+  
+    === FONTE DI VERITÀ INTERNA (DB LOCALE) ===
+    {testo_db}
     
-    COMPITO:
-    1. Verifica se la richiesta dell'utente ha senso logico e gastronomico (es. abbinamenti assurdi di ingredienti).
-    2. Controlla se i dati raccolti contengono le informazioni minime per scrivere una ricetta (ingredienti e passaggi base).
+    === INFORMAZIONI DI CONTESTO (RICERCA WEB) ===
+    {testo_web}
     
-    Se la richiesta è un'assurdità o mancano i dati fondamentali, imposta is_valid=False. Altrimenti imposta True.
+  
+    COMPITO E CRITERI DI VALUTAZIONE:
+    1. **Senso Gastronomico (Coerenza)**: La richiesta ha senso logico dal punto di vista culinario? Blocca immediatamente ricette assurde, accostamenti improponibili o disgustosi (es. "Tiramisù al merluzzo", "Carbonara con la Nutella").
+    2. **Sufficienza dei Dati**: Verifica semplicemente se, unendo il DB Locale e la Ricerca Web, abbiamo abbastanza informazioni (ingredienti, dosi o procedimenti minimi) per poter scrivere un articolo sensato su questo piatto.
+    3. **Esito**: 
+       - Imposta la validazione su True se il piatto è gastronomicamente valido e ci sono dati sufficienti per parlarne.
+       - Imposta la validazione su False se il piatto è un'assurdità culinaria o se non è stato trovato assolutamente nulla in nessuna delle due fonti.
+       
     """
 
     llm_validator = llm.with_structured_output(ValidationResult)
@@ -133,16 +146,21 @@ def writer_node(state: Blog_Cucina):
     print("\n--- [NODO 4: WRITER (Sintesi e Grounding)] ---")
     topic = state["topic_corrente"]
 
-    # Anche qui, estraiamo i dati di ricerca dalla memoria
-    dati_raccolti = "\n\n".join(
-        [
-            m.content
-            for m in state["messages"]
-            if hasattr(m, "type") and m.type == "tool"
-        ]
-    )
+    dati_db_locale = []
+    dati_web = []
 
-    # Recuperiamo l'eventuale feedback umano (se il nodo viene ri-eseguito dopo che tu hai chiesto modifiche!)
+    for m in state["messages"]:
+        if hasattr(m, "type") and m.type == "tool":
+            if getattr(m, "name", "") == "cerca_ricetta_nel_db":
+                if "Nessuna ricetta" not in m.content:
+                    dati_db_locale.append(m.content)
+            elif getattr(m, "name", "") == "esegui_ricerca_web":
+                dati_web.append(m.content)
+
+    ha_db_locale = len(dati_db_locale) > 0
+    testo_db = "\n".join(dati_db_locale) if ha_db_locale else "NESSUN DATO IN LOCALE"
+    testo_web = "\n".join(dati_web) if dati_web else "NESSUN DATO DAL WEB"
+
     feedback = state.get("human_feedback")
     istruzione_correzione = (
         f"\nATTENZIONE - RICHIESTA DEL CAPO REDATTORE: {feedback}\nAdatta la ricetta seguendo questa istruzione."
@@ -150,15 +168,28 @@ def writer_node(state: Blog_Cucina):
         else ""
     )
 
-    prompt_sistema = f""" Sei un food blogger professionista. Scrivi un post di massimo 150 parole su: {topic}.
+    regola_gerarchia_fonti = (
+        """
+    1. Se nel {testo_db} trovi la ricetta CORETTA (non varianti o modifiche) hai DEVI usare ESCLUSIVAMENTE gli ingredienti, le dosi (es. 1l di latte, 100g di burro, 100g di farina per la Besciamella) e il procedimento descritti lì. 
+    2. Se NEL  {testo_db}  non trovi la modifica o variante richeista dall'utente, allora sei autorizzato a usare i dati della 'RICERCA WEB' per gli ingredienti e le dosi.
+    """
+        if ha_db_locale
+        else """
+    1. Il DB Locale non ha restituito risultati. Usa i dati della {testo_web} per estrarre ingredienti, dosi esatte e procedimento.
+    """
+    )
+
+    prompt_sistema = f"""Sei un food blogger professionista. Scrivi un post di massimo 150 parole su: {topic}.
     
-    REGOLE DI GROUNDING:
-    1. Usa le dosi esatte presenti nei dati locali per la scheda tecnica del piatto (non inventare).
-    2. Usa le curiosità web per inserire un'introduzione discorsiva su trend o varianti.
-    3. Cita le fonti a fine articolo. {istruzione_correzione}
+    === GERARCHIA DELLE FONTI DI VERITÀ (RISPETTA RIGIDAMENTE): ===
+    {regola_gerarchia_fonti}
+    4. Cita le fonti utilizzate a fine articolo (se usi il DB locale, indica come fonte la struttura interna o la fonte specificata nel payload del DB. altrimenti cita la fonte del web. In entrambi i casi metti il link). {istruzione_correzione}
     
-    DATI RACCOLTI DAGLI STRUMENTI:
-    {dati_raccolti}
+    === DATI COMPILATI DAL DB LOCALE ===
+    {testo_db}
+    
+    === DATI COMPILATI DALLA RICERCA WEB ===
+    {testo_web}
     """
 
     risposta_llm = llm.invoke(prompt_sistema)
@@ -173,8 +204,6 @@ def human_review_node(state: Blog_Cucina):
     print(bozza)
     print("\n================================================\n")
 
-    #  LA MAGIA: Il grafo si congela qui e invia questo messaggio all'interfaccia (o al terminale)
-    # L'esecuzione si ferma finché non inserisci un valore per "feedback"
     feedback = interrupt(
         "Bozza pronta! Digita 'Approvo' per pubblicare, o scrivi le modifiche (es. 'Mettici meno sale')."
     )
@@ -206,5 +235,29 @@ def kg_update_node(state: Blog_Cucina):
         )
     except Exception as e:
         print(f"Errore durante il salvataggio su Neo4j: {str(e)}")
+
+    return {}
+
+
+def aggiorna_topic_node(state: Blog_Cucina):
+    """
+    Nodo che estrae la scelta dell'utente dal tool chiedi_variante
+    e aggiorna topic_corrente per la ricerca successiva.
+    """
+    ultimo_messaggio = state["messages"][-1]
+    nuovo_topic = None
+
+    if (
+        hasattr(ultimo_messaggio, "content")
+        and "SCELTA_UTENTE|" in ultimo_messaggio.content
+    ):
+        scelta = ultimo_messaggio.content.split("|")[-1].strip()
+        # Possiamo anche pulire la scelta (es. "1. Caponata al forno" -> "Caponata al forno")
+        if scelta[0].isdigit() and ". " in scelta:
+            nuovo_topic = scelta.split(". ", 1)[-1]
+        else:
+            nuovo_topic = scelta
+        print(f"[AGGIORNA TOPIC] Nuovo topic impostato a: '{nuovo_topic}'")
+        return {"topic_corrente": nuovo_topic}
 
     return {}

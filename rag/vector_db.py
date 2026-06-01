@@ -67,7 +67,10 @@ def inizializza_vector_db():
 
     print("Vettorizzo e salvo nel database Chroma...")
     vector_store = Chroma.from_documents(
-        documents=documenti_langchain, embedding=EMBEDDINGS, persist_directory=DB_DIR
+        documents=documenti_langchain,
+        embedding=EMBEDDINGS,
+        persist_directory=DB_DIR,
+        collection_metadata={"hnsw:space": "cosine"},
     )
 
     print("Vector DB pronto!")

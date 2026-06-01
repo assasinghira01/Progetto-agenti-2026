@@ -9,44 +9,37 @@ load_dotenv()
 NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "password")
-kg_client = CucinaKnowledgeGraph(uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD)
+kg_client = CucinaKnowledgeGraph(
+    uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD
+)
+
 
 @tool
 def controlla_storico_post(topic: str) -> str:
     """
-    Usa questo strumento per interrogare il Knowledge Graph e scoprire se 
-    nel blog è già stato pubblicato un articolo su un determinato piatto 
-    o su una sua variante (es. Caponata Catanese vs Palermitana).
-    
-    Da usare SEMPRE all'inizio della pianificazione per evitare ripetizioni.
-    
-    Args:
-        topic: Il nome del piatto da controllare.
+    Verifica se il piatto è già stato pubblicato.
+    Restituisce "BLOCCATO" + dettagli se duplicato, altrimenti "OK".
     """
-    try:
-        risultato = kg_client.controlla_cronologia_post(topic)
-        
-        if risultato:
-            
-            messaggio = (
-                f"[TOOL NEO4J] STOP DI SISTEMA! Il piatto '{topic}' è GIÀ PRESENTE nel database "
-                f"(Titolo post esistente: '{risultato['titolo_post']}'). "
-                f"REQUISITO DI SISTEMA: È severamente vietato procedere autonomamente o inventare ricette. "
-                f"DEVI ASSOLUTAMENTE FERMARTI qui. Formula un messaggio per l'utente in cui proponi "
-                f"3 varianti creative e alternative (es. varianti al forno, regionali o ingredienti diversi) "
-                f"e chiedigli esplicitamente quale preferisce esplorare, inserendo un punto di domanda."
-            )
-            
-            # Stampiamo a schermo per te nel terminale
-            print(f"\n[TOOL NEO4J] Rilevato duplicato! Blocco l'agente e gli ordino di proporre varianti.")
-            return messaggio
-            
-        # Se è un piatto nuovo:
-        messaggio_ok = f"Nessun post precedente trovato per '{topic}'. Puoi procedere liberamente."
-        print(f"\n[TOOL NEO4J] Via libera per '{topic}'.")
-        return messaggio_ok
-        
-    except Exception as e:
-        errore = f"Errore di connessione a Neo4j: {str(e)}"
-        print(f"\n[TOOL NEO4J] {errore}")
-        return errore
+    risultato = kg_client.controlla_cronologia_post(topic)
+    if risultato:
+        return f"BLOCCATO|Il piatto '{topic}' è già stato pubblicato come '{risultato['titolo_post']}'"
+    return f"OK|Nessun post precedente per '{topic}'"
+
+
+@tool
+def krag_suggerisci_varianti(topic: str) -> str:
+    """
+    Usa il Knowledge Graph per ottenere gli ingredienti base e suggerire varianti creative.
+    Da chiamare solo dopo che controlla_storico_post ha restituito BLOCCATO.
+    """
+    ingredienti_base = kg_client.espandi_query_per_krag(topic)
+    if not ingredienti_base:
+        return "KRAG_ERRORE|Nessun ingrediente trovato nel grafo per generare varianti."
+
+    # Costruisci un messaggio ricco per l'agente
+    varianti = f"INGREDIENTI_BASE: {', '.join(ingredienti_base)}\n"
+    varianti += "SUGGERISCI_QUESTE_3_VARIANTI:\n"
+    varianti += "1. Variante light (riduci grassi, aggiungi erbe aromatiche)\n"
+    varianti += "2. Variante ricca (aggiungi formaggi o salumi tipici)\n"
+    varianti += "3. Variante di stagione (usa ingredienti diversi in base al periodo)\n"
+    return varianti

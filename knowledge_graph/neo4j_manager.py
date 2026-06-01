@@ -49,15 +49,6 @@ class CucinaKnowledgeGraph:
         return termini_espansi
 
     def salva_post(self, topic_originale: str, topic_finale: str):
-        """
-        Salva il post nel Knowledge Graph. Se il topic_finale è una variante di quello originale,
-        costruisce una struttura gerarchica collegando la variante alla ricetta madre.
-        """
-        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
-        user = os.getenv("NEO4J_USER", "neo4j")
-        pwd = os.getenv("NEO4J_PASSWORD", "password")
-
-        driver = GraphDatabase.driver(uri, auth=(user, pwd))
 
         # Controllo se l'output finale differisce dal concetto originale (è una variante)
         if topic_originale.lower() != topic_finale.lower():
@@ -85,7 +76,7 @@ class CucinaKnowledgeGraph:
         """
             print(f"⚙️ [NEO4J] Registrazione ricetta standard '{topic_originale}'.")
 
-        with driver.session() as session:
+        with self.driver.session() as session:
             session.run(
                 query,
                 topic_originale=topic_originale.capitalize(),
@@ -93,7 +84,7 @@ class CucinaKnowledgeGraph:
                 data=datetime.now().strftime("%Y-%m-%d"),
                 titolo=f"Post su {topic_finale.capitalize()}",
             )
-        driver.close()
+        self.driver.close()
 
 
 # Esportiamo l'istanza pronta all'uso

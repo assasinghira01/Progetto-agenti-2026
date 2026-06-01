@@ -12,7 +12,7 @@ from langgraph.types import Command
 
 def main():
     print("====================================================")
-    print(" 🍳 AI Food Blogger Copilot - Sistema K-RAG + HITL ")
+    print(" AI Food Blogger Copilot - Sistema K-RAG + HITL ")
     print("====================================================")
 
     # Inizializziamo o carichiamo il database vettoriale locale
@@ -29,7 +29,7 @@ def main():
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
-    print("\n🚀 Avvio del flusso di lavoro dell'Agente...\n")
+    print("\nAvvio del flusso di lavoro dell'Agente...\n")
 
     # --- PRIMO AVVIO DEL GRAFO ---
     # Girerà finché non incontra la FINE o un punto di interruzione (interrupt)
