@@ -65,7 +65,7 @@ def krag_research_node(state: Blog_Cucina):
        - Se inizia con "OK": significa che il post è nuovo. Devi raccogliere le informazioni seguendo questo esatto flusso di ragionamento (Thought -> Action):
          
             Sai che il nostro database locale contiene solo ricette quindi non troverai nulla su sagre, eventi ecc. Effetua la ricerca su DB LOCALE usando 'cerca_ricetta_nel_db' solo se parliamo di ricette. Nel caso in cui
-            L'utente richieda varianti o modifiche delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web".
+            L'utente richieda varianti o modifiche delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web" DEVI estrarre gli INGREDIENTI, le DOSI e il PROCEDIMENTO.
             
            Nel caso in cui l'utente non parli di ricette non chiamare 'cerca_ricetta_nel_db' e vai direttamente con 'esegui_ricerca_web' per raccogliere informazioni di contesto sul '{topic}' in questione.
          
@@ -169,28 +169,21 @@ def writer_node(state: Blog_Cucina):
     )
 
     regola_gerarchia_fonti = (
-        """
-    1. Se nel {testo_db} trovi la ricetta CORETTA (non varianti o modifiche) hai DEVI usare ESCLUSIVAMENTE gli ingredienti, le dosi (es. 1l di latte, 100g di burro, 100g di farina per la Besciamella) e il procedimento descritti lì. 
-    2. Se NEL  {testo_db}  non trovi la modifica o variante richeista dall'utente, allora sei autorizzato a usare i dati della 'RICERCA WEB' per gli ingredienti e le dosi.
-    """
+        f"""
+Se nel {testo_db} trovi la ricetta CORRETTA (non varianti o modifiche) DEVI usare ESCLUSIVAMENTE gli ingredienti, le dosi (es. 1l di latte, 100g di burro, 100g di farina per la Besciamella) e il procedimento descritti lì. 
+Se nel {testo_db} non trovi la modifica o variante richiesta dall'utente, allora DEVI  usare ESCLUSIVAMENTE i dati del {testo_web} per gli ingredienti, le dosi e il procedimento."""
         if ha_db_locale
-        else """
-    1. Il DB Locale non ha restituito risultati. Usa i dati della {testo_web} per estrarre ingredienti, dosi esatte e procedimento.
-    """
+        else f"""
+Il DB Locale non ha restituito risultati. Usa i dati della {testo_web} per estrarre ingredienti, dosi esatte e procedimento."""
     )
 
-    prompt_sistema = f"""Sei un food blogger professionista. Scrivi un post di massimo 150 parole su: {topic}.
-    
+    prompt_sistema = f"""Sei un food blogger professionista. Scrivi un post su: {topic} con breve introduzione (max 30 parole).
+
     === GERARCHIA DELLE FONTI DI VERITÀ (RISPETTA RIGIDAMENTE): ===
     {regola_gerarchia_fonti}
-    4. Cita le fonti utilizzate a fine articolo (se usi il DB locale, indica come fonte la struttura interna o la fonte specificata nel payload del DB. altrimenti cita la fonte del web. In entrambi i casi metti il link). {istruzione_correzione}
-    
-    === DATI COMPILATI DAL DB LOCALE ===
-    {testo_db}
-    
-    === DATI COMPILATI DALLA RICERCA WEB ===
-    {testo_web}
-    """
+    DEVI SPECIFICARE LE DOSI ESATTE DEGLI INGREDIENTI presi dalla fonte che stai utilizzando (es. 100g di farina, 1l di latte) E UN RIASSUNTO BREVE DEL PROCEDIMENTO(MAX 100 PAROLE , NON UTILIZZARE ELENCHI PUNTATI PER IL PROCEDIMENTO MA FAI UN RIASSUNTO):  SE E SOLO SE SONO PRESENTI NELLE FONTI FORNITE.
+    NON DEVI MAI USARE GLI INGREDIENTI CONTENUTI NEL DB LOCALE SE LA RICETTA TROVATA NON CORRISPONDE ALLA VARIANTE RICHIESTA DALL'UTENTE. IN QUEL CASO DEVI USARE SOLO I DATI DELLA RICERCA WEB.
+    Cita le fonti utilizzate a fine articolo (se usi il DB locale, indica come fonte la struttura interna o la fonte specificata nel payload del DB. altrimenti cita la fonte del web. In entrambi i casi metti il link). {istruzione_correzione}=== DATI COMPILATI DAL DB LOCALE ==={testo_db}=== DATI COMPILATI DALLA RICERCA WEB ==={testo_web}"""
 
     risposta_llm = llm.invoke(prompt_sistema)
     return {"post_draft": risposta_llm.content}
