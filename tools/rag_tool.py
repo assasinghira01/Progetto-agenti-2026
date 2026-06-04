@@ -14,7 +14,6 @@ def cerca_ricetta_nel_db(query: str) -> str:
     Questa è la tua fonte di verità principale per gli ingredienti.
     """
     try:
-
         embeddings_locali = HuggingFaceEmbeddings(
             model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
         )
@@ -23,36 +22,32 @@ def cerca_ricetta_nel_db(query: str) -> str:
             persist_directory=DB_DIR, embedding_function=embeddings_locali
         )
 
-        # Con similarity_search_with_score prendiamo le distanze grezze (L2 o Cosine)
-        # Non lancia eccezioni sui punteggi negativi o fuori range [0,1]
-        risultati_con_distanza = vector_store.similarity_search_with_score(query, k=5)
+        # Prendiamo i 5 documenti più vicini semanticamente
+        risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         print(f"\n[DEBUG DISTANZE PER {query}]:")
-        risultati_filtrati = []
+        documenti_recuperati = []
+
         for doc, dist in risultati_con_distanza:
             payload = doc.metadata.get("payload", "")
-            # Estrai il titolo (assumendo formato "Ricetta: Nome ...")
+
+            # Estraiamo il titolo solo per fare un log pulito sul terminale
             titolo = ""
             if "Ricetta:" in payload:
                 titolo = payload.split("Ricetta:")[1].split("\n")[0].strip().lower()
-            print(f" -> Piatto: {titolo[:30]}... | Distanza: {dist}")
 
-            # Filtro per similarità semantica + corrispondenza testuale
-            # Se la distanza è accettabile (es. < 1.0) E il titolo contiene la query (o viceversa)
-            if dist < 1.0 and (query.lower() in titolo or titolo in query.lower()):
-                risultati_filtrati.append(doc)
-            else:
-                print(f"    Scartato perché non contiene '{query}'")
+            print(f" -> Recuperato: {titolo[:30]}... | Distanza: {dist}")
 
-        if risultati_filtrati:
+            documenti_recuperati.append(doc)
+
+        if documenti_recuperati:
+            # Uniamo i payload di tutti i documenti trovati
             testo_risultati = "\n\n".join(
-                [res.metadata.get("payload", "") for res in risultati_filtrati]
+                [res.metadata.get("payload", "") for res in documenti_recuperati]
             )
             return testo_risultati
 
-        return (
-            "Nessuna ricetta sufficientemente pertinente trovata nel database locale."
-        )
+        return "Nessuna ricetta trovata nel database locale."
 
     except Exception as e:
         # Se fallisce di nuovo, questo print ti dirà l'errore esatto nel terminale

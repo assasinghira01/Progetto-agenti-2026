@@ -7,11 +7,11 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage
 from typing import Optional
 
-# 1. NUOVA IMPORTAZIONE: Importiamo ChatOpenAI direttamente qui
+
 from langchain_openai import ChatOpenAI
 
 
-# 2. Schema Pydantic "Mutaforma" per Ricette, Sagre e Trend
+# . Schema Pydantic per Ricette, Sagre e Trend
 class ContenutoWebEstratto(BaseModel):
     titolo: str = Field(description="Il titolo della pagina o dell'articolo.")
     tipo_contenuto: str = Field(
@@ -31,7 +31,6 @@ class ContenutoWebEstratto(BaseModel):
     )
 
 
-# 3. IL TRUCCO: Inizializziamo un LLM locale, economico, solo per l'estrazione!
 llm_estrazione = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 estrattore_web = llm_estrazione.with_structured_output(ContenutoWebEstratto)
 
@@ -75,7 +74,14 @@ def esegui_ricerca_web(query: str) -> str:
                     + "\n"
                 )
 
-                print(f" [Web Tool] Dati estratti con successo da {url}")
+                print(f"\n[Web Tool] Dati estratti con successo da {url}:")
+                print(
+                    json.dumps(
+                        dati_strutturati.model_dump(exclude_none=True),
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
 
             except Exception as e_scrape:
                 print(

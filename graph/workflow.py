@@ -1,7 +1,6 @@
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import interrupt
-from langchain_core.messages import HumanMessage
 from graph.state import Blog_Cucina
+from langchain_core.messages import AIMessage
 from graph.nodes import (
     planner_node,
     krag_research_node,
@@ -21,41 +20,72 @@ nodo_strumenti = ToolNode(lista_tools)
 
 
 # --- 2. FUNZIONI DI ROUTING ---
-def router_ricerca(state: Blog_Cucina):
-    """Controlla se l'agente ha deciso di usare un tool o ha finito."""
+def smista_documenti_node(state: Blog_Cucina):
+    print("\n--- [NODO INTERMEDIO: SMISTAMENTO DOCUMENTI] ---")
     ultimo_messaggio = state["messages"][-1]
 
-    # Se l'LLM ha richiesto l'uso di uno strumento (es. ha chiamato cerca_ricetta_nel_db)
+    # Controlliamo quale tool ha appena risposto per salvare il testo nel cassetto corretto
+    if hasattr(ultimo_messaggio, "name"):
+        if ultimo_messaggio.name == "cerca_ricetta_nel_db":
+            print(" -> [STATO] Salvo i dati in: rag_documents")
+            return {"rag_documents": [ultimo_messaggio.content]}
+        elif ultimo_messaggio.name == "esegui_ricerca_web":
+            print(" -> [STATO] Salvo i dati in: web_documents")
+            return {"web_documents": [ultimo_messaggio.content]}
+
+    return {}
+
+
+# --- 3. FUNZIONI DI ROUTING CONDIZIONALE (ROUTER) ---
+
+
+def router_ricerca(state: Blog_Cucina):
+    """Decide se l'agente deve usare un tool (ReAct) o se ha finito la ricerca."""
+    ultimo_messaggio = state["messages"][-1]
+
+    # Se l'LLM ha richiesto l'uso di uno strumento (es. ha generato tool_calls)
     if hasattr(ultimo_messaggio, "tool_calls") and ultimo_messaggio.tool_calls:
         print(
-            f"  L'Agente sta usando i tool: {[t['name'] for t in ultimo_messaggio.tool_calls]}"
+            f"  L'Agente richiede i tool: {[t['name'] for t in ultimo_messaggio.tool_calls]}"
         )
         return "tools"
 
-    # Se non ha chiamato tool, significa che ha finito di raccogliere dati
+    # Se non ci sono tool_calls, l'agente ha finito di raccogliere dati
     print(" L'Agente ha concluso la ricerca. Passo al validatore.")
     return "validator"
 
 
 def after_tools(state: Blog_Cucina):
     """
-    Dopo l'esecuzione dei tool, decide se aggiornare il topic (se è stato chiamato chiedi_variante)
-    o tornare direttamente all'agente.
+    Controlla se tra i tool appena eseguiti c'era 'chiedi_variante'.
+    In quel caso devia su 'aggiorna_topic', altrimenti rimanda ad analizzare i dati.
     """
-    ultimo_messaggio = state["messages"][-1]
-    # Verifica se l'ultimo tool eseguito è chiedi_variante
-    if hasattr(ultimo_messaggio, "name") and ultimo_messaggio.name == "chiedi_variante":
-        return "aggiorna_topic"
+    ultimo_ai_message = None
+    # Andiamo a ritroso nella cronologia per trovare l'ultimo messaggio dell'AI con dei tool
+    for m in reversed(state["messages"]):
+        if isinstance(m, AIMessage) and m.tool_calls:
+            ultimo_ai_message = m
+            break
+
+    if ultimo_ai_message:
+        nomi_tool_chiamati = [t["name"] for t in ultimo_ai_message.tool_calls]
+        if "chiedi_variante" in nomi_tool_chiamati:
+            print(" [ROUTING] Rilevato tool 'chiedi_variante'. Vado ad aggiorna_topic.")
+            return "aggiorna_topic"
+
+    print(" [ROUTING] Tool standard eseguito. Torno all'agente di ricerca.")
     return "research"
 
 
 def check_validation(state: Blog_Cucina):
-    """Legge lo stato del validatore e decide dove indirizzare il flusso."""
+    """Legge l'esito del validatore strutturato e fa routing."""
     if state.get("is_valid") == True:
-        print("ROUTING: Validazione superata! Procedo alla scrittura.")
+        print("ROUTING: Validazione superata! Procedo alla scrittura della bozza.")
         return "writer"
     else:
-        print("ROUTING: Rilevata assurdità o mancanza di dati. Blocco il processo!")
+        print(
+            "ROUTING: Rilevata assurdità o mancanza totale di dati. Blocco il processo!"
+        )
         return "end_block"
 
 
@@ -81,6 +111,7 @@ builder.add_node("writer", writer_node)
 builder.add_node("human_review", human_review_node)
 builder.add_node("kg_update", kg_update_node)
 builder.add_node("tools", nodo_strumenti)
+builder.add_node("smista_documenti", smista_documenti_node)
 builder.add_node("aggiorna_topic", aggiorna_topic_node)
 
 # Definizione degli archi standard
@@ -93,11 +124,14 @@ builder.add_conditional_edges(
     {"tools": "tools", "validator": "validator"},
 )
 
+builder.add_edge("tools", "smista_documenti")
+
 builder.add_conditional_edges(
-    "tools",
+    "smista_documenti",
     after_tools,
     {"aggiorna_topic": "aggiorna_topic", "research": "research"},
 )
+
 
 builder.add_edge("aggiorna_topic", "research")
 

@@ -12,16 +12,22 @@ class CucinaKnowledgeGraph:
         Verifica se il piatto o una sua variante ha già un Post associato.
         Ritorna un dizionario con i dettagli se trova un duplicato, altrimenti None.
         """
+
+        topic_pulito = topic.strip().lower()
         query_cypher = """
-        MATCH (r:Ricetta) WHERE toLower(r.name) CONTAINS toLower($topic)
-        OPTIONAL MATCH (r)-[:IS_VARIANTE_DI]-(padre:Concetto)-[:IS_VARIANTE_DI]-(variante:Ricetta)
-        MATCH (p:Post)-[:PARLA_DI]->(collegato)
-        WHERE collegato = r OR collegato = variante
-        RETURN collegato.name AS piatto_trattato, p.titolo AS titolo_post
-        LIMIT 1
-        """
+    // 1. Cerchiamo la ricetta che corrisponde al testo inserito
+    MATCH (r:Ricetta)
+    WHERE toLower(r.name) = toLower($topic)
+    
+    // 2. Cerchiamo SOLO il post direttamente collegato a questo specifico nodo
+    MATCH (p:Post)-[:PARLA_DI]->(r)
+    
+    // 3. Restituiamo i dati del post diretto
+    RETURN r.name AS piatto_trattato, p.titolo AS titolo_post
+    LIMIT 1
+    """
         with self.driver.session() as session:
-            risultati = session.run(query_cypher, topic=topic)
+            risultati = session.run(query_cypher, topic=topic_pulito)
             record = risultati.single()
             if record and record["titolo_post"] is not None:
                 return {
@@ -48,43 +54,87 @@ class CucinaKnowledgeGraph:
                     termini_espansi.append(record["ingrediente"])
         return termini_espansi
 
-    def salva_post(self, topic_originale: str, topic_finale: str):
+    def salva_post(
+        self,
+        topic_originale: str,
+        topic_finale: str,
+        ingredienti: list = None,
+        fonti: list = None,
+        claims: list = None,
+    ):
 
-        # Controllo se l'output finale differisce dal concetto originale (è una variante)
-        if topic_originale.lower() != topic_finale.lower():
-            query = """
-        // 1. Assicuriamo l'esistenza della Ricetta madre
-        MERGE (madre:Ricetta {name: $topic_originale})
-        // 2. Creiamo il nodo concettuale della variante
-        MERGE (variante:Concetto {name: $topic_finale})
-        // 3. Colleghiamo la variante gerarchicamente alla madre
-        MERGE (variante)-[:IS_VARIANTE_DI]->(madre)
-        // 4. Generiamo il nuovo Post pubblicato
-        CREATE (p:Post {data: $data, titolo: $titolo})
-        // 5. Colleghiamo il Post all'entità specifica trattata
-        CREATE (p)-[:PARLA_DI]->(variante)
-        """
-            print(
-                f"⚙️ [NEO4J] Registrazione variante '{topic_finale}' associata alla radice '{topic_originale}'."
-            )
-        else:
-            # Struttura di pubblicazione standard per ricetta base
-            query = """
-        MERGE (r:Ricetta {name: $topic_originale})
-        CREATE (p:Post {data: $data, titolo: $titolo})
-        CREATE (p)-[:PARLA_DI]->(r)
-        """
-            print(f"⚙️ [NEO4J] Registrazione ricetta standard '{topic_originale}'.")
+        ingredienti = ingredienti or []
+        fonti = fonti or []
+        claims = claims or []
+
+        op_madre = topic_originale.strip().capitalize()
+        op_finale = topic_finale.strip().capitalize()
+        data_oggi = datetime.now().strftime("%Y-%m-%d")
+        titolo_post = f"Post su {op_finale} - {data_oggi}"
+        is_variante = op_madre.lower() != op_finale.lower()
 
         with self.driver.session() as session:
-            session.run(
-                query,
-                topic_originale=topic_originale.capitalize(),
-                topic_finale=topic_finale.capitalize(),
-                data=datetime.now().strftime("%Y-%m-%d"),
-                titolo=f"Post su {topic_finale.capitalize()}",
-            )
-        self.driver.close()
+
+            # ── FASE 0: Nodo radice Blog (hub comune a tutto il grafo) ──────────
+            session.run("""
+            MERGE (b:Blog {name: "Il mio Blog di Cucina Siciliana"})
+        """)
+
+            # ── FASE 1: Struttura concettuale ───────────────────────────────────
+            if is_variante:
+                session.run(
+                    """
+                MERGE (b:Blog {name: "Il mio Blog di Cucina Siciliana"})
+                MERGE (madre:Ricetta {name: $topic_originale})
+                MERGE (variante:Ricetta {name: $topic_finale})
+                MERGE (variante)-[:IS_VARIANTE_DI]->(madre)
+                CREATE (p:Post {name: $titolo, titolo: $titolo, data: $data})
+                CREATE (b)-[:HA_PUBBLICATO]->(p)  
+                CREATE (p)-[:PARLA_DI]->(variante)
+                    """,
+                    topic_originale=op_madre,
+                    topic_finale=op_finale,
+                    titolo=titolo_post,
+                    data=data_oggi,
+                )
+                print(f"[NEO4J] Variante '{op_finale}' → '{op_madre}'")
+            else:
+                session.run(
+                    """
+                MERGE (b:Blog {name: "Il mio Blog di Cucina Siciliana"})
+                MERGE (r:Ricetta {name: $topic_originale})
+                CREATE (p:Post {name: $titolo, titolo: $titolo, data: $data})
+                CREATE (b)-[:HA_PUBBLICATO]->(p)  
+                CREATE (p)-[:PARLA_DI]->(r)
+                    """,
+                    topic_originale=op_madre,
+                    titolo=titolo_post,
+                    data=data_oggi,
+                )
+            print(f"[NEO4J] Ricetta standard '{op_madre}'")
+
+            # ── FASE 2: Ingredienti (collegati al topic_finale, non solo madre) ─
+            # FIX: usiamo topic_finale così funziona anche per le varianti
+            if ingredienti:
+                session.run(
+                    """
+                MATCH (r:Ricetta {name: $topic_finale})
+                UNWIND $ingredienti AS ing_name
+                MERGE (i:Ingrediente {name: ing_name})
+                MERGE (r)-[:CONTIENE]->(i)
+            """,
+                    topic_finale=op_finale,
+                    ingredienti=ingredienti,
+                )
+            print(f"[NEO4J] {len(ingredienti)} ingredienti → '{op_finale}'")
+
+        print(f"[NEO4J] Post '{titolo_post}' salvato correttamente.")
+
+    def __del__(self):
+        """Si attiva automaticamente quando l'oggetto viene rimosso dalla memoria."""
+        if hasattr(self, "driver") and self.driver:
+            print(" [NEO4J] Chiusura sicura del driver di connessione.")
+            self.driver.close()
 
 
 # Esportiamo l'istanza pronta all'uso

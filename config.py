@@ -9,7 +9,7 @@ load_dotenv()
 
 
 # Agente intelligente OpenAI
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=400)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=600)
 
 
 # --- IL BINDING DEGLI STRUMENTI (Pattern MCP) ---

@@ -65,7 +65,7 @@ def krag_research_node(state: Blog_Cucina):
        - Se inizia con "OK": significa che il post è nuovo. Devi raccogliere le informazioni seguendo questo esatto flusso di ragionamento (Thought -> Action):
          
             Sai che il nostro database locale contiene solo ricette quindi non troverai nulla su sagre, eventi ecc. Effetua la ricerca su DB LOCALE usando 'cerca_ricetta_nel_db' solo se parliamo di ricette. Nel caso in cui
-            L'utente richieda varianti o modifiche delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web" DEVI estrarre gli INGREDIENTI, le DOSI e il PROCEDIMENTO.
+            L'utente richieda varianti, modifiche o versioni light/leggere delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web" DEVI estrarre gli INGREDIENTI, le DOSI e il PROCEDIMENTO.
             
            Nel caso in cui l'utente non parli di ricette non chiamare 'cerca_ricetta_nel_db' e vai direttamente con 'esegui_ricerca_web' per raccogliere informazioni di contesto sul '{topic}' in questione.
          
@@ -77,12 +77,13 @@ def krag_research_node(state: Blog_Cucina):
     if not messaggi:
         messaggi_da_inviare = [
             istruzioni_mcp,
-            HumanMessage(content=f"Inizia la ricerca per: {topic}"),
+            HumanMessage(content=f"Inizia la ricerca per il topic: {topic}"),
         ]
     else:
-        messaggi_da_inviare = messaggi + [istruzioni_mcp]
+        messaggi_da_inviare = [istruzioni_mcp] + messaggi
 
     risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
+
     return {"messages": [risposta_llm]}
 
 
@@ -90,21 +91,8 @@ def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
     topic = state["topic_corrente"]
 
-    # pescando i messaggi di tipo "tool" dalla cronologia dell'Agente.
-    dati_db_locale = []
-    dati_web = []
-
-    # Cicliamo sui messaggi per estrarre il contenuto in base al tool che l'ha generato
-    for m in state["messages"]:
-        if hasattr(m, "type") and m.type == "tool":
-            nome_tool = getattr(m, "name", "")
-
-            if nome_tool == "cerca_ricetta_nel_db":
-                if "Nessuna ricetta" not in m.content:
-                    dati_db_locale.append(m.content)
-
-            elif nome_tool == "esegui_ricerca_web":
-                dati_web.append(m.content)
+    dati_db_locale = state.get("rag_documents", [])
+    dati_web = state.get("web_documents", [])
 
     testo_db = (
         "\n".join(dati_db_locale)
@@ -146,16 +134,8 @@ def writer_node(state: Blog_Cucina):
     print("\n--- [NODO 4: WRITER (Sintesi e Grounding)] ---")
     topic = state["topic_corrente"]
 
-    dati_db_locale = []
-    dati_web = []
-
-    for m in state["messages"]:
-        if hasattr(m, "type") and m.type == "tool":
-            if getattr(m, "name", "") == "cerca_ricetta_nel_db":
-                if "Nessuna ricetta" not in m.content:
-                    dati_db_locale.append(m.content)
-            elif getattr(m, "name", "") == "esegui_ricerca_web":
-                dati_web.append(m.content)
+    dati_db_locale = state.get("rag_documents", [])
+    dati_web = state.get("web_documents", [])
 
     ha_db_locale = len(dati_db_locale) > 0
     testo_db = "\n".join(dati_db_locale) if ha_db_locale else "NESSUN DATO IN LOCALE"
@@ -168,24 +148,48 @@ def writer_node(state: Blog_Cucina):
         else ""
     )
 
-    regola_gerarchia_fonti = (
-        f"""
-Se nel {testo_db} trovi la ricetta CORRETTA (non varianti o modifiche) DEVI usare ESCLUSIVAMENTE gli ingredienti, le dosi (es. 1l di latte, 100g di burro, 100g di farina per la Besciamella) e il procedimento descritti lì. 
-Se nel {testo_db} non trovi la modifica o variante richiesta dall'utente, allora DEVI  usare ESCLUSIVAMENTE i dati del {testo_web} per gli ingredienti, le dosi e il procedimento."""
-        if ha_db_locale
-        else f"""
-Il DB Locale non ha restituito risultati. Usa i dati della {testo_web} per estrarre ingredienti, dosi esatte e procedimento."""
+    if ha_db_locale:
+        regola_gerarchia = (
+            "Se nei DATI_DB_LOCALE c'è la ricetta esatta (NON varianti), usa ESCLUSIVAMENTE quella.\n"
+            "Se l'utente ha chiesto una variante (es. light, senza lattosio, ecc.) e il DB locale non la contiene, "
+            "ignora il DB locale e usa ESCLUSIVAMENTE i DATI_RICERCA_WEB."
+        )
+    else:
+        regola_gerarchia = (
+            "Il DB Locale è vuoto. Usa ESCLUSIVAMENTE i dati della DATI_RICERCA_WEB."
+        )
+
+    # 2. Prompt di Sistema: Qui diamo SOLO le regole operative e di formattazione
+    prompt_sistema = f"""Sei un food blogger professionista. Scrivi un post accattivante su: {topic}.
+
+=== REGOLE DI STRUTTURA DEL POST ===
+Il tuo output deve seguire RIGIDAMENTE questa struttura, senza eccezioni:
+1. TITOLO: Un titolo accattivante per il blog.
+2. INTRODUZIONE: Una breve introduzione (MAX 30 parole).
+3. INGREDIENTI: Un elenco puntato con TUTTI gli ingredienti e le DOSI ESATTE (es. 500ml di latte, 50g di farina) estratti dalla fonte corretta. Non dimenticare nessuna dose!
+4. PREPARAZIONE: Un riassunto breve in formato testuale narrativo (MAX 100 parole). NON USARE elenchi puntati o numerati in questa sezione, ma descrivi i passaggi in modo fluido.
+5. FONTE: Cita la fonte con il link alla fine.
+
+=== GERARCHIA DELLE FONTI (RISPETTA RIGIDAMENTE) ===
+{regola_gerarchia}
+{istruzione_correzione}
+"""
+
+    # 3. Contenuto del Messaggio Umano: Iniettiamo i dati puliti separati dalle regole
+    contenuto_utente = f"""Ecco i dati a tua disposizione. Identifica la fonte corretta secondo le regole e genera il post.
+
+=== DATI_DB_LOCALE ===
+{testo_db}
+
+=== DATI_RICERCA_WEB ===
+{testo_web}
+"""
+
+    # Inviamo la richiesta strutturata all'LLM
+    risposta_llm = llm.invoke(
+        [SystemMessage(content=prompt_sistema), HumanMessage(content=contenuto_utente)]
     )
 
-    prompt_sistema = f"""Sei un food blogger professionista. Scrivi un post su: {topic} con breve introduzione (max 30 parole).
-
-    === GERARCHIA DELLE FONTI DI VERITÀ (RISPETTA RIGIDAMENTE): ===
-    {regola_gerarchia_fonti}
-    DEVI SPECIFICARE LE DOSI ESATTE DEGLI INGREDIENTI presi dalla fonte che stai utilizzando (es. 100g di farina, 1l di latte) E UN RIASSUNTO BREVE DEL PROCEDIMENTO(MAX 100 PAROLE , NON UTILIZZARE ELENCHI PUNTATI PER IL PROCEDIMENTO MA FAI UN RIASSUNTO):  SE E SOLO SE SONO PRESENTI NELLE FONTI FORNITE.
-    NON DEVI MAI USARE GLI INGREDIENTI CONTENUTI NEL DB LOCALE SE LA RICETTA TROVATA NON CORRISPONDE ALLA VARIANTE RICHIESTA DALL'UTENTE. IN QUEL CASO DEVI USARE SOLO I DATI DELLA RICERCA WEB.
-    Cita le fonti utilizzate a fine articolo (se usi il DB locale, indica come fonte la struttura interna o la fonte specificata nel payload del DB. altrimenti cita la fonte del web. In entrambi i casi metti il link). {istruzione_correzione}=== DATI COMPILATI DAL DB LOCALE ==={testo_db}=== DATI COMPILATI DALLA RICERCA WEB ==={testo_web}"""
-
-    risposta_llm = llm.invoke(prompt_sistema)
     return {"post_draft": risposta_llm.content}
 
 
@@ -206,51 +210,104 @@ def human_review_node(state: Blog_Cucina):
     return {"human_feedback": feedback}
 
 
+class EstrattoreIngredienti(BaseModel):
+    ingredienti: list[str] = Field(
+        description="Lista dei soli nomi degli ingredienti principali estratti dal testo, in formato singolare e senza dosi (es. ['Melanzana', 'Pomodoro', 'Peperone'])"
+    )
+
+
+# Prepariamo l'LLM strutturato
+llm_estrattore = llm.with_structured_output(EstrattoreIngredienti)
+
+
 def kg_update_node(state: Blog_Cucina):
     print("\n--- [NODO 6: KG UPDATE (Aggiornamento Memoria)] ---")
     topic_finale = state["topic_corrente"]
+    bozza_articolo = state.get("post_draft", "")
 
-    # Estraiamo il concetto puro (senza le estensioni della variante) dall'input originario
+    # 1. Prompt corazzato con regole gastronomiche per estrarre la vera radice
+    prompt_estrazione_radice = f"""
+    Analizza l'input originario dell'utente: '{state['input_utente']}' 
+    e identifica il nome della ricetta base/madre di riferimento.
+    
+    REGOLE TASSONOMICHE RIGIDE:
+    Considera come VARIANTI solo le specifiche modifiche dietetiche, salutistiche, svuotafrigo o rivisitazioni bizzarre (es. 'Light', 'Vegana', 'Senza glutine', 'Al forno' se applicato a piatti espressi).
+    Mentre considera come RADICE MADRE il nome del piatto originale senza queste specifiche modifiche. Se l'input è già molto generico e non contiene modifiche evidenti, la radice madre sarà uguale all'input stesso.
+    
+    Esempi di conversione:
+    - 'Pasta alla carbonara light' -> Radice: 'Pasta alla carbonara' (o 'Carbonara')
+    - tiramisù senza mascarpone -> Radice: 'Tiramisù'
+    - 'Caponata di pesce spada' -> Radice: 'Caponata'
+    - Se l'input è per esempio 'Caponata' senza specifiche aggiuntive, la radice madre è 'Caponata'.
+    """
+
     risultato_originale = llm_structured.invoke(
-        [
-            HumanMessage(
-                content=f"Estrai il piatto principale (no varianti) da: {state['input_utente']}"
-            )
-        ]
+        [HumanMessage(content=prompt_estrazione_radice)]
     )
-    topic_originale = risultato_originale.topic
+    topic_originale = risultato_originale.topic.capitalize()
 
+    # Log di controllo per verificare l'estrazione sul terminale
+    print(
+        f" -> [DEBUG GEOMETRIA GRAFO]: Radice Madre: '{topic_originale}' | Output Finale: '{topic_finale}'"
+    )
+
+    # 2. Estrazione degli ingredienti dal post (Come abbiamo impostato prima)
+    lista_ingredienti = []
+    if bozza_articolo:
+        try:
+            prompt_parsing = f"""Analizza la sezione 'INGREDIENTI' di questa bozza. 
+            Estranni esclusivamente i nomi puliti degli ingredienti, al singolare e senza dosi.
+            BOZZA:\n{bozza_articolo}"""
+            risultato_ing = llm_estrattore.invoke(
+                [HumanMessage(content=prompt_parsing)]
+            )
+            lista_ingredienti = [
+                ing.strip().capitalize()
+                for ing in risultato_ing.ingredienti
+                if ing.strip()
+            ]
+        except Exception as e_parsing:
+            print(f" Errore parsing ingredienti: {e_parsing}")
+
+    # 3. Salvataggio su Neo4j
     try:
-        # Passiamo entrambe le entità per mappare la gerarchia corretta
-        kg_client.salva_post(topic_originale, topic_finale)
-        print(
-            f"STORICO AGGIORNATO: Il post su '{topic_finale}' è stato salvato nel Grafo di Neo4j!"
-        )
+        kg_client.salva_post(topic_originale, topic_finale, lista_ingredienti)
+        print(f"STORICO AGGIORNATO: Salvato su Neo4j!")
     except Exception as e:
-        print(f"Errore durante il salvataggio su Neo4j: {str(e)}")
+        print(f"Errore su Neo4j: {str(e)}")
 
     return {}
 
 
 def aggiorna_topic_node(state: Blog_Cucina):
     """
-    Nodo che estrae la scelta dell'utente dal tool chiedi_variante
-    e aggiorna topic_corrente per la ricerca successiva.
+    Usa un mini-LLM strutturato per estrarre in modo sicuro la variante scelta
+    evitando la fragilità dello split testuale manuale.
     """
-    ultimo_messaggio = state["messages"][-1]
-    nuovo_topic = None
+    print("\n--- [NODO: AGGIORNA TOPIC] ---")
 
-    if (
-        hasattr(ultimo_messaggio, "content")
-        and "SCELTA_UTENTE|" in ultimo_messaggio.content
-    ):
-        scelta = ultimo_messaggio.content.split("|")[-1].strip()
-        # Possiamo anche pulire la scelta (es. "1. Caponata al forno" -> "Caponata al forno")
-        if scelta[0].isdigit() and ". " in scelta:
-            nuovo_topic = scelta.split(". ", 1)[-1]
-        else:
-            nuovo_topic = scelta
-        print(f"[AGGIORNA TOPIC] Nuovo topic impostato a: '{nuovo_topic}'")
-        return {"topic_corrente": nuovo_topic}
+    # 1. Recuperiamo il testo digitato dall'utente.
+    # Se arriva dal tool chiedi_variante (interrupt nel ciclo di ricerca), lo troviamo nell'ultimo messaggio.
+    # Se arriva dalla revisione finale, lo troviamo in human_feedback.
+    ultimo_messaggio = state["messages"][-1] if state.get("messages") else None
 
-    return {}
+    scelta_utente = state.get("human_feedback")
+
+    if not scelta_utente and ultimo_messaggio:
+        scelta_utente = ultimo_messaggio.content
+
+    if not scelta_utente:
+        print(" [AGGIORNA TOPIC] Nessun input utente trovato. Salto.")
+        return {}
+
+    # 2. Parsing sicuro con l'LLM Strutturato
+    prompt_parsing = f"""L'utente ha selezionato una variante tra quelle proposte o ha indicato una nuova rotta. 
+    Estrarre SOLO il nome pulito del piatto o della variante scelto da questo testo: '{scelta_utente}'"""
+
+    risultato = llm_structured.invoke([HumanMessage(content=prompt_parsing)])
+    nuovo_topic = risultato.topic.capitalize()
+
+    print(
+        f" [AGGIORNA TOPIC] Rilevata scelta utente. Nuovo topic impostato a: '{nuovo_topic}'"
+    )
+    return {"topic_corrente": nuovo_topic}
