@@ -41,10 +41,23 @@ def esegui_ricerca_web(query: str) -> str:
     Cerca su Internet informazioni legati al topic.
     Entra nelle pagine web ed estrae dati strutturati.
     """
-    tool_tavily = TavilySearchResults(max_results=1, language="it")
+    tool_tavily = TavilySearchResults(
+        max_results=5,
+        language="it",
+        exclude_domains=[
+            "youtube.com",
+            "pinterest.com",
+            "pinterest.it",
+            "instagram.com",
+            "facebook.com",
+            "tikTok.com",
+        ],
+        country="IT",
+    )
 
     try:
-        risultati = tool_tavily.invoke({"query": query})
+        query_italiana = f"{query} sito in italiano"
+        risultati = tool_tavily.invoke({"query": query_italiana})
         output_finale = ""
 
         for i, res in enumerate(risultati):
@@ -55,7 +68,7 @@ def esegui_ricerca_web(query: str) -> str:
                 loader = WebBaseLoader(url)
                 documenti = loader.load()
                 testo_pagina = documenti[0].page_content
-                testo_pulito = " ".join(testo_pagina.split())[:10000]
+                testo_pulito = " ".join(testo_pagina.split())[:15000]
 
                 # ESTRAZIONE STRUTTURATA (Usando il mini-LLM dedicato!)
                 prompt_estrazione = f"Leggi questo testo web grezzo ed estrai le informazioni:\n\n{testo_pulito}"

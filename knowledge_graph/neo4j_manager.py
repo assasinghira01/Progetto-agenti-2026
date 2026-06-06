@@ -15,14 +15,9 @@ class CucinaKnowledgeGraph:
 
         topic_pulito = topic.strip().lower()
         query_cypher = """
-    // 1. Cerchiamo la ricetta che corrisponde al testo inserito
     MATCH (r:Ricetta)
     WHERE toLower(r.name) = toLower($topic)
-    
-    // 2. Cerchiamo SOLO il post direttamente collegato a questo specifico nodo
     MATCH (p:Post)-[:PARLA_DI]->(r)
-    
-    // 3. Restituiamo i dati del post diretto
     RETURN r.name AS piatto_trattato, p.titolo AS titolo_post
     LIMIT 1
     """
@@ -58,77 +53,209 @@ class CucinaKnowledgeGraph:
         self,
         topic_originale: str,
         topic_finale: str,
-        ingredienti: list = None,
-        fonti: list = None,
-        claims: list = None,
+        ingredienti_diretti: list | None = None,
+        sotto_ricette: list | None = None,
+        fonte: str = "",
     ):
 
-        ingredienti = ingredienti or []
-        fonti = fonti or []
-        claims = claims or []
+        ingredienti_diretti = ingredienti_diretti or []
+        sotto_ricette = sotto_ricette or []
 
         op_madre = topic_originale.strip().capitalize()
         op_finale = topic_finale.strip().capitalize()
+
         data_oggi = datetime.now().strftime("%Y-%m-%d")
+
         titolo_post = f"Post su {op_finale} - {data_oggi}"
+
         is_variante = op_madre.lower() != op_finale.lower()
 
         with self.driver.session() as session:
 
-            # ── FASE 0: Nodo radice Blog (hub comune a tutto il grafo) ──────────
+            # ==================================================
+            # BLOG ROOT
+            # ==================================================
+
             session.run("""
-            MERGE (b:Blog {name: "Il mio Blog di Cucina Siciliana"})
-        """)
+                MERGE (b:Blog {
+                    name: "Il mio Blog di Cucina Siciliana"
+                })
+                """)
 
-            # ── FASE 1: Struttura concettuale ───────────────────────────────────
+            # ==================================================
+            # RICETTA + POST
+            # ==================================================
+
             if is_variante:
+
                 session.run(
                     """
-                MERGE (b:Blog {name: "Il mio Blog di Cucina Siciliana"})
-                MERGE (madre:Ricetta {name: $topic_originale})
-                MERGE (variante:Ricetta {name: $topic_finale})
-                MERGE (variante)-[:IS_VARIANTE_DI]->(madre)
-                CREATE (p:Post {name: $titolo, titolo: $titolo, data: $data})
-                CREATE (b)-[:HA_PUBBLICATO]->(p)  
-                CREATE (p)-[:PARLA_DI]->(variante)
+                    MERGE (b:Blog {
+                        name: "Il mio Blog di Cucina Siciliana"
+                    })
+
+                    MERGE (madre:Ricetta {
+                        name: $topic_originale
+                    })
+
+                    MERGE (variante:Ricetta {
+                        name: $topic_finale
+                    })
+
+                    MERGE (variante)-[:IS_VARIANTE_DI]->(madre)
+
+                    CREATE (p:Post {
+                        titolo: $titolo,
+                        data: $data
+                    })
+
+                    MERGE (b)-[:HA_PUBBLICATO]->(p)
+
+                    MERGE (p)-[:PARLA_DI]->(variante)
                     """,
                     topic_originale=op_madre,
                     topic_finale=op_finale,
                     titolo=titolo_post,
                     data=data_oggi,
                 )
-                print(f"[NEO4J] Variante '{op_finale}' → '{op_madre}'")
+
+                print(f"[NEO4J] Variante " f"'{op_finale}' -> '{op_madre}'")
+
             else:
+
                 session.run(
                     """
-                MERGE (b:Blog {name: "Il mio Blog di Cucina Siciliana"})
-                MERGE (r:Ricetta {name: $topic_originale})
-                CREATE (p:Post {name: $titolo, titolo: $titolo, data: $data})
-                CREATE (b)-[:HA_PUBBLICATO]->(p)  
-                CREATE (p)-[:PARLA_DI]->(r)
+                    MERGE (b:Blog {
+                        name: "Il mio Blog di Cucina Siciliana"
+                    })
+
+                    MERGE (r:Ricetta {
+                        name: $topic_originale
+                    })
+
+                    CREATE (p:Post {
+                        titolo: $titolo,
+                        data: $data
+                    })
+
+                    MERGE (b)-[:HA_PUBBLICATO]->(p)
+
+                    MERGE (p)-[:PARLA_DI]->(r)
                     """,
                     topic_originale=op_madre,
                     titolo=titolo_post,
                     data=data_oggi,
                 )
-            print(f"[NEO4J] Ricetta standard '{op_madre}'")
 
-            # ── FASE 2: Ingredienti (collegati al topic_finale, non solo madre) ─
-            # FIX: usiamo topic_finale così funziona anche per le varianti
-            if ingredienti:
+                print(f"[NEO4J] Ricetta standard " f"'{op_madre}'")
+
+            # ==================================================
+            # INGREDIENTI DIRETTI
+            # ==================================================
+
+            if ingredienti_diretti:
+
                 session.run(
                     """
-                MATCH (r:Ricetta {name: $topic_finale})
-                UNWIND $ingredienti AS ing_name
-                MERGE (i:Ingrediente {name: ing_name})
-                MERGE (r)-[:CONTIENE]->(i)
-            """,
-                    topic_finale=op_finale,
-                    ingredienti=ingredienti,
-                )
-            print(f"[NEO4J] {len(ingredienti)} ingredienti → '{op_finale}'")
+                    MATCH (r:Ricetta {
+                        name: $topic_finale
+                    })
 
-        print(f"[NEO4J] Post '{titolo_post}' salvato correttamente.")
+                    UNWIND $ingredienti AS ing
+
+                    MERGE (i:Ingrediente {
+                        name: toLower(trim(ing.nome))
+                    })
+
+                    MERGE (r)-[rel:CONTIENE]->(i)
+
+                    SET rel.quantita = ing.quantita
+                    """,
+                    topic_finale=op_finale,
+                    ingredienti=ingredienti_diretti,
+                )
+
+                print(
+                    f"[NEO4J] "
+                    f"{len(ingredienti_diretti)} "
+                    f"ingredienti diretti salvati."
+                )
+
+            # ==================================================
+            # SOTTORICETTE
+            # ==================================================
+
+            for sub in sotto_ricette:
+
+                session.run(
+                    """
+                    
+                        MATCH (main:Ricetta {
+                            name: $topic_finale
+                        })
+                        MERGE (madre_sub:Ricetta {
+                            name: toLower($classe_astratta)
+                        })
+                        MERGE (specifica_sub:Ricetta {
+                            name: toLower($nome_specifico)
+                        })
+                        MERGE (specifica_sub)-[:IS_VARIANTE_DI]->(madre_sub)
+
+                        MERGE (main)-[:USA_PREPARAZIONE]->(specifica_sub)
+                        """,
+                    topic_finale=op_finale,
+                    nome_specifico=sub["nome_specifico"],
+                    classe_astratta=sub["classe_astratta"],
+                )
+
+                ingredienti_sub = sub.get("ingredienti", [])
+
+                if ingredienti_sub:
+
+                    session.run(
+                        """
+                        MATCH (specifica_sub:Ricetta {
+                            name: toLower($nome_specifico)
+                        })
+
+                        UNWIND $ingredienti AS ing
+
+                        MERGE (i:Ingrediente {
+                            name: toLower(trim(ing.nome))
+                        })
+                        MERGE (specifica_sub)-[rel:CONTIENE]->(i)
+                        SET rel.quantita = ing.quantita
+                        SET rel.fase = ing.fase_utilizzo
+                        """,
+                        nome_specifico=sub["nome_specifico"],
+                        ingredienti=ingredienti_sub,
+                    )
+
+            if sotto_ricette:
+
+                print(f"[NEO4J] " f"{len(sotto_ricette)} " f"sottoricette salvate.")
+
+            if fonte:
+
+                session.run(
+                    """
+                    MATCH (p:Post {
+                        titolo: $titolo
+                    })
+
+                    MERGE (f:Fonte {
+                        url: $fonte
+                    })
+
+                    MERGE (p)-[:USA_FONTE]->(f)
+                    """,
+                    titolo=titolo_post,
+                    fonte=fonte,
+                )
+
+                print(f"[NEO4J] Fonte registrata.")
+
+        print(f"[NEO4J] Post '{titolo_post}' " f"salvato correttamente.")
 
     def __del__(self):
         """Si attiva automaticamente quando l'oggetto viene rimosso dalla memoria."""

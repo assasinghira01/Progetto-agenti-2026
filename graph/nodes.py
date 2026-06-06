@@ -2,28 +2,12 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from config import llm, llm_con_tools
+from graph.schemas import RecipeDraft, TopicExtraction, ValidationResult
 from graph.state import Blog_Cucina
 from knowledge_graph.neo4j_manager import kg_client
+from typing import Optional
 
-
-class ValidationResult(BaseModel):
-    is_valid: bool = Field(
-        description="True se le fonti sono coerenti e contengono una ricetta logica e fattibile, False se la richiesta contiene assurdità o mancano dati fondamentali."
-    )
-    reasoning: str = Field(
-        description="Spiegazione dettagliata del perché hai accettato o rifiutato le fonti."
-    )
-
-
-# Schema di output
-class TopicExtraction(BaseModel):
-    topic: str = Field(
-        description="Il nome del piatto o ingrediente principale richiesto."
-    )
-
-
-# Prepariamo l'LLM strutturato da usare dentro il planner_node
-
+# per il planner
 llm_structured = llm.with_structured_output(TopicExtraction)
 
 
@@ -35,7 +19,7 @@ def planner_node(state: Blog_Cucina):
     risultato = llm_structured.invoke(
         [HumanMessage(content=f"Estrai il topic: {input_utente}")]
     )
-    topic_estratto = risultato.topic.capitalize()
+    topic_estratto = risultato.topic.strip().capitalize()
 
     print(f" Topic identificato: {topic_estratto}")
 
@@ -89,108 +73,248 @@ def krag_research_node(state: Blog_Cucina):
 
 def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
+
     topic = state["topic_corrente"]
 
     dati_db_locale = state.get("rag_documents", [])
-    dati_web = state.get("web_documents", [])
+    dati_web_grezzi = state.get("web_documents", [])
+
+    # =========================================================
+    # 🛠️ FIX: SCOLLIAMO I DOCUMENTI WEB INCOLLATI DAL TOOL
+    # =========================================================
+    dati_web = []
+    for blocco in dati_web_grezzi:
+        if isinstance(blocco, str) and "--- Fonte Web:" in blocco:
+            # Dividiamo la mega-stringa usando il delimitatore del tuo tool
+            estratti = blocco.split("--- Fonte Web:")
+            for estratto in estratti:
+                if estratto.strip():  # Ignoriamo i pezzi vuoti
+                    dati_web.append("--- Fonte Web:" + estratto)
+        else:
+            dati_web.append(blocco)
+    # Ora dati_web è una VERA lista dove len(dati_web) = numero effettivo di siti
+    # =========================================================
 
     testo_db = (
         "\n".join(dati_db_locale)
         if dati_db_locale
         else "NESSUNA RICETTA TROVATA NEL DB LOCALE"
     )
-    testo_web = "\n".join(dati_web) if dati_web else "NESSUN DATO COLLATERALE DAL WEB"
 
-    prompt = f"""Analizza la fattibilità editoriale per il piatto: '{topic}'.
-    
-    DATI RACCOLTI DAGLI STRUMENTI (DB Locale e Web):
-     
-  
-    === FONTE DI VERITÀ INTERNA (DB LOCALE) ===
-    {testo_db}
-    
-    === INFORMAZIONI DI CONTESTO (RICERCA WEB) ===
-    {testo_web}
-    
-  
-    COMPITO E CRITERI DI VALUTAZIONE:
-    1. **Senso Gastronomico (Coerenza)**: La richiesta ha senso logico dal punto di vista culinario? Blocca immediatamente ricette assurde, accostamenti improponibili o disgustosi (es. "Tiramisù al merluzzo", "Carbonara con la Nutella").
-    2. **Sufficienza dei Dati**: Verifica semplicemente se, unendo il DB Locale e la Ricerca Web, abbiamo abbastanza informazioni (ingredienti, dosi o procedimenti minimi) per poter scrivere un articolo sensato su questo piatto.
-    3. **Esito**: 
-       - Imposta la validazione su True se il piatto è gastronomicamente valido e ci sono dati sufficienti per parlarne.
-       - Imposta la validazione su False se il piatto è un'assurdità culinaria o se non è stato trovato assolutamente nulla in nessuna delle due fonti.
-       
-    """
+    # Numerazione dei documenti web
+    if dati_web:
+        web_numerati = []
+        for idx, doc in enumerate(dati_web):
+            web_numerati.append(f"\n=== WEB_DOC_{idx} ===\n{doc}\n")
+
+        testo_web = "\n".join(web_numerati)
+
+    else:
+        testo_web = "NESSUN DATO COLLATERALE DAL WEB"
+
+    prompt = f"""
+Analizza la fattibilità editoriale per il piatto: '{topic}'.
+
+=== FONTE DI VERITÀ INTERNA (DB LOCALE) ===
+{testo_db}
+
+=== INFORMAZIONI DI CONTESTO (RICERCA WEB) ===
+{testo_web}
+
+COMPITO E CRITERI DI VALUTAZIONE:
+
+1. SENSO GASTRONOMICO:
+   Blocca ricette assurde o accostamenti privi di senso.
+2. SUFFICIENZA DEI DATI:
+   Verifica se abbiamo abbastanza informazioni per scrivere un articolo attendibile.
+3. PERTINENZA DEL DB LOCALE:
+   Se il DB locale contiene una ricetta coerente con il topic imposta usa_db_locale=True.
+   Se contiene ricette completamente scollegate imposta usa_db_locale=False.
+4. ESITO:
+   - True se il topic è valido e documentato.
+   - False se il topic è assurdo oppure non esistono dati utilizzabili.
+
+5. QUALITÀ FONTI WEB:
+   I documenti web sono identificati come:
+
+   WEB_DOC_0
+   WEB_DOC_1
+   WEB_DOC_2
+   ...
+
+   Seleziona SOLO gli ID dei documenti migliori.
+   DEVE essere scelto un solo documento. La scelta deve essere basata sulla pertinenza, autorevolezza e completezza 
+   delle informazioni rispetto al topic, evitando discrepanze e siti ripetitivi.
+   La fonte web approvata deve essere coerente con il topic.
+   Inserisci gli ID nel campo:
+   documenti_web_approvati
+"""
 
     llm_validator = llm.with_structured_output(ValidationResult)
+
     esito = llm_validator.invoke([HumanMessage(content=prompt)])
 
     print(f" Esito Validazione: {esito.is_valid}")
-    print(f" Motivazione dell'LLM: {esito.reasoning}")
-    return {"is_valid": esito.is_valid}
+    print(f" Motivazione: {esito.reasoning}")
+    print(f" Usa DB Locale: {esito.usa_db_locale}")
+    print(f" Documenti Web Approvati: {esito.documenti_web_approvati}")
+    print(f" Motivazione Qualità: {esito.motivazione_qualita}")
+
+    # PRUNING DELLO STATO
+
+    dati_web_filtrati = []
+
+    for idx in esito.documenti_web_approvati:
+        if 0 <= idx < len(dati_web):
+            dati_web_filtrati.append(dati_web[idx])
+
+    dati_db_filtrati = dati_db_locale if esito.usa_db_locale else []
+
+    direttiva = (
+        f"Fonte web selezionata dal revisore: "
+        f"{esito.documenti_web_approvati}. "
+        f"Motivazione: {esito.motivazione_qualita}"
+    )
+    print(f" Dati web filtrati:\n{dati_web_filtrati} ")
+    return {
+        "is_valid": esito.is_valid,
+        "valutazione_qualita": direttiva,
+        "approved_web_documents": dati_web_filtrati,
+        "rag_documents": dati_db_filtrati,
+    }
 
 
 def writer_node(state: Blog_Cucina):
     print("\n--- [NODO 4: WRITER (Sintesi e Grounding)] ---")
     topic = state["topic_corrente"]
-
     dati_db_locale = state.get("rag_documents", [])
-    dati_web = state.get("web_documents", [])
-
-    ha_db_locale = len(dati_db_locale) > 0
-    testo_db = "\n".join(dati_db_locale) if ha_db_locale else "NESSUN DATO IN LOCALE"
+    dati_web = state.get("approved_web_documents", [])
+    testo_db = "\n".join(dati_db_locale) if dati_db_locale else "NESSUN DATO IN LOCALE"
     testo_web = "\n".join(dati_web) if dati_web else "NESSUN DATO DAL WEB"
-
     feedback = state.get("human_feedback")
+    print(f"datiweb: {testo_web}")
+    print(f"datilocale: {testo_db}")
     istruzione_correzione = (
-        f"\nATTENZIONE - RICHIESTA DEL CAPO REDATTORE: {feedback}\nAdatta la ricetta seguendo questa istruzione."
+        f"""
+
+FEEDBACK REDATTORE:
+
+{feedback}
+
+Applica queste modifiche.
+"""
         if feedback
         else ""
     )
 
-    if ha_db_locale:
-        regola_gerarchia = (
-            "Se nei DATI_DB_LOCALE c'è la ricetta esatta (NON varianti), usa ESCLUSIVAMENTE quella.\n"
-            "Se l'utente ha chiesto una variante (es. light, senza lattosio, ecc.) e il DB locale non la contiene, "
-            "ignora il DB locale e usa ESCLUSIVAMENTE i DATI_RICERCA_WEB."
-        )
-    else:
-        regola_gerarchia = (
-            "Il DB Locale è vuoto. Usa ESCLUSIVAMENTE i dati della DATI_RICERCA_WEB."
-        )
+    prompt = f"""
+Sei un food blogger professionista.
 
-    # 2. Prompt di Sistema: Qui diamo SOLO le regole operative e di formattazione
-    prompt_sistema = f"""Sei un food blogger professionista. Scrivi un post accattivante su: {topic}.
+ARGOMENTO:
+{topic}
 
-=== REGOLE DI STRUTTURA DEL POST ===
-Il tuo output deve seguire RIGIDAMENTE questa struttura, senza eccezioni:
-1. TITOLO: Un titolo accattivante per il blog.
-2. INTRODUZIONE: Una breve introduzione (MAX 30 parole).
-3. INGREDIENTI: Un elenco puntato con TUTTI gli ingredienti e le DOSI ESATTE (es. 500ml di latte, 50g di farina) estratti dalla fonte corretta. Non dimenticare nessuna dose!
-4. PREPARAZIONE: Un riassunto breve in formato testuale narrativo (MAX 100 parole). NON USARE elenchi puntati o numerati in questa sezione, ma descrivi i passaggi in modo fluido.
-5. FONTE: Cita la fonte con il link alla fine.
+Devi produrre una ricetta strutturata.
 
-=== GERARCHIA DELLE FONTI (RISPETTA RIGIDAMENTE) ===
-{regola_gerarchia}
+REGOLE IMPORTANTI:
+
+- Non inventare ingredienti.
+- Non inventare quantità.
+- Non inventare preparazioni.
+- Usa solo le informazioni presenti nelle fonti.
+- INGREDIENTI: Estrai le dosi ESCLUSIVAMENTE dal testo della fonte selezionata.
+ È severamente vietato unire le dosi di due siti diversi o inventarle. 
+Rispetta la divisione gerarchica tra ingredienti diretti e sotto-ricette.
+
+
+SOTTORICETTE:
+Se individui preparazioni autonome (es. Ragù, Besciamella, Crema pasticcera, Ganache, Pastella)
+NON inserirle negli ingredienti diretti.
+Crea invece una SottoRicetta con:
+- nome_specifico
+- classe_astratta
+- ingredienti
+Esempio:
+nome_specifico = "Ragù per arancini"
+classe_astratta = "Ragù"
+ingredienti = [...]
+REGOLA TASSATIVA ANTI-TOPPING E CONDIMENTI 
+È severamente VIETATO creare una SottoRicetta per raggruppamenti di ingredienti crudi o pronti che devono solo essere posizionati sopra il piatto.
+Se la fonte ha un titolo come "PER CONDIRE", "TOPPING", "PER GUARNIRE", "FARCITURA" (es. pomodoro, mozzarella, prosciutto su una pizza, o verdure in un'insalata):
+1. DEVI IGNORARE QUEL TITOLO.
+2. NON CREARE ALCUNA SOTTORICETTA.
+3. Prendi tutti quegli ingredienti e inseriscili nella lista degli INGREDIENTI DIRETTI, assegnando loro la fase_utilizzo "Condimento" o "Guarnizione"
+
+INGREDIENTI DIRETTI:
+Inserisci qui soltanto gli ingredienti che appartengono direttamente alla ricetta principale.
+Esempio:
+Arancini:
+- Riso
+- Burro
+- Zafferano
+
+INTRODUZIONE:
+max 30 parole.
+PREPARAZIONE:
+max 100 parole.
+
 {istruzione_correzione}
-"""
 
-    # 3. Contenuto del Messaggio Umano: Iniettiamo i dati puliti separati dalle regole
-    contenuto_utente = f"""Ecco i dati a tua disposizione. Identifica la fonte corretta secondo le regole e genera il post.
+FONTI:
 
-=== DATI_DB_LOCALE ===
+=== DB LOCALE ===
 {testo_db}
 
-=== DATI_RICERCA_WEB ===
+=== WEB ===
 {testo_web}
 """
 
-    # Inviamo la richiesta strutturata all'LLM
-    risposta_llm = llm.invoke(
-        [SystemMessage(content=prompt_sistema), HumanMessage(content=contenuto_utente)]
-    )
+    llm_writer = llm.with_structured_output(RecipeDraft)
+    draft = llm_writer.invoke([HumanMessage(content=prompt)])
+    # =======================================================
+    # PULIZIA DATI "ANTI-MATRIOSKA" (Prima di generare il Markdown)
+    # =======================================================
+    sottoricette_pulite = []
+    ingredienti_da_spostare = []
+    for sub in draft.sotto_ricette:
+        if not sub.ingredienti:
+            continue
+        if len(sub.ingredienti) == 1:
+            ing_nome = sub.ingredienti[0].nome.lower()
+            sub_nome = sub.classe_astratta.lower()
+            # Se la preparazione contiene se stessa come ingrediente
+            if sub_nome in ing_nome or ing_nome in sub_nome:
+                # Spostiamo l'ingrediente finito nella lista dei diretti
+                ingredienti_da_spostare.append(sub.ingredienti[0])
+                continue  # Ignora la sottoricetta
 
-    return {"post_draft": risposta_llm.content}
+        # Se passa i controlli, la conserviamo
+        sottoricette_pulite.append(sub)
+    # Aggiorniamo l'oggetto draft originale con i dati puliti
+    draft.sotto_ricette = sottoricette_pulite
+    draft.ingredienti_diretti.extend(ingredienti_da_spostare)
+    # =======================================================
+    print("\n===== DEBUG WRITER =====")
+    print(draft.model_dump())
+    print("========================\n")
+    markdown = f"# {draft.titolo}\n\n"
+    markdown += "## Introduzione\n\n"
+    markdown += draft.introduzione + "\n\n"
+    markdown += "## Ingredienti Principali\n\n"
+    for ing in draft.ingredienti_diretti:
+        markdown += f"- {ing.nome}: " f"{ing.quantita}\n"
+    if draft.sotto_ricette:
+        markdown += "\n"
+        for sub in draft.sotto_ricette:
+            markdown += f"### {sub.nome_specifico}\n\n"
+            for ing in sub.ingredienti:
+                markdown += f"- {ing.nome}: " f"{ing.quantita}\n"
+            markdown += "\n"
+    markdown += "\n## Preparazione\n\n" f"{draft.preparazione}\n\n"
+    markdown += "## Fonte\n\n" f"{draft.fonte}"
+    return {
+        "recipe_draft": draft,
+        "post_draft": markdown,
+    }
 
 
 def human_review_node(state: Blog_Cucina):
@@ -210,35 +334,68 @@ def human_review_node(state: Blog_Cucina):
     return {"human_feedback": feedback}
 
 
-class EstrattoreIngredienti(BaseModel):
-    ingredienti: list[str] = Field(
-        description="Lista dei soli nomi degli ingredienti principali estratti dal testo, in formato singolare e senza dosi (es. ['Melanzana', 'Pomodoro', 'Peperone'])"
-    )
-
-
-# Prepariamo l'LLM strutturato
-llm_estrattore = llm.with_structured_output(EstrattoreIngredienti)
-
-
 def kg_update_node(state: Blog_Cucina):
     print("\n--- [NODO 6: KG UPDATE (Aggiornamento Memoria)] ---")
-    topic_finale = state["topic_corrente"]
-    bozza_articolo = state.get("post_draft", "")
 
-    # 1. Prompt corazzato con regole gastronomiche per estrarre la vera radice
+    draft = state.get("recipe_draft")
+    if not draft:
+        print("[ERRORE] Nessun recipe_draft trovato nello stato.")
+        return {}
+
+    topic_finale = state["topic_corrente"]
+    fonte = draft.fonte
+
+    # ==========================================
+    # 1. ESTRAZIONE INGREDIENTI DIRETTI
+    # ==========================================
+    ingredienti_diretti = [
+        {
+            "nome": ing.nome,
+            "quantita": ing.quantita,
+            "fase_utilizzo": getattr(ing, "fase_utilizzo", "Base"),
+        }
+        for ing in draft.ingredienti_diretti
+    ]
+
+    # ==========================================
+    # 2. ESTRAZIONE SOTTO RICETTE
+    # ==========================================
+    sotto_ricette = [
+        {
+            "nome_specifico": sub.nome_specifico,
+            "classe_astratta": sub.classe_astratta,
+            "ingredienti": [
+                {
+                    "nome": ing.nome,
+                    "quantita": ing.quantita,
+                    "fase_utilizzo": getattr(ing, "fase_utilizzo", "Base"),
+                }
+                for ing in sub.ingredienti
+            ],
+        }
+        for sub in draft.sotto_ricette
+    ]
+
+    # ==========================================
+    # 3. ESTRAZIONE RADICE ONTOLOGICA
+    # ==========================================
     prompt_estrazione_radice = f"""
     Analizza l'input originario dell'utente: '{state['input_utente']}' 
     e identifica il nome della ricetta base/madre di riferimento.
-    
+
     REGOLE TASSONOMICHE RIGIDE:
-    Considera come VARIANTI solo le specifiche modifiche dietetiche, salutistiche, svuotafrigo o rivisitazioni bizzarre (es. 'Light', 'Vegana', 'Senza glutine', 'Al forno' se applicato a piatti espressi).
-    Mentre considera come RADICE MADRE il nome del piatto originale senza queste specifiche modifiche. Se l'input è già molto generico e non contiene modifiche evidenti, la radice madre sarà uguale all'input stesso.
-    
+    Devi estrarre la RADICE MADRE in questi due casi specifici:
+    1. Modifiche dietetiche/salutistiche/cottura (es. 'Light', 'Vegana', 'Senza glutine', 'Al forno').
+    2. Gusti, declinazioni o condimenti classici applicati a una base neutra (es. i gusti delle pizze, i sughi per la pasta, i tipi di risotto o torte).
+
+    Se l'input è già una ricetta base senza specifiche aggiuntive (es. 'Caponata', 'Tiramisù', 'Pizza'), la radice madre sarà uguale all'input stesso.
+
     Esempi di conversione:
-    - 'Pasta alla carbonara light' -> Radice: 'Pasta alla carbonara' (o 'Carbonara')
-    - tiramisù senza mascarpone -> Radice: 'Tiramisù'
-    - 'Caponata di pesce spada' -> Radice: 'Caponata'
-    - Se l'input è per esempio 'Caponata' senza specifiche aggiuntive, la radice madre è 'Caponata'.
+    'Pasta alla carbonara light' -> Radice: 'Pasta alla carbonara'
+    'Tiramisù senza mascarpone' -> Radice: 'Tiramisù'
+    'Pizza capricciosa' -> Radice: 'Pizza'
+    'Pizza margherita' -> Radice: 'Pizza'
+   
     """
 
     risultato_originale = llm_structured.invoke(
@@ -251,30 +408,31 @@ def kg_update_node(state: Blog_Cucina):
         f" -> [DEBUG GEOMETRIA GRAFO]: Radice Madre: '{topic_originale}' | Output Finale: '{topic_finale}'"
     )
 
-    # 2. Estrazione degli ingredienti dal post (Come abbiamo impostato prima)
-    lista_ingredienti = []
-    if bozza_articolo:
-        try:
-            prompt_parsing = f"""Analizza la sezione 'INGREDIENTI' di questa bozza. 
-            Estranni esclusivamente i nomi puliti degli ingredienti, al singolare e senza dosi.
-            BOZZA:\n{bozza_articolo}"""
-            risultato_ing = llm_estrattore.invoke(
-                [HumanMessage(content=prompt_parsing)]
-            )
-            lista_ingredienti = [
-                ing.strip().capitalize()
-                for ing in risultato_ing.ingredienti
-                if ing.strip()
-            ]
-        except Exception as e_parsing:
-            print(f" Errore parsing ingredienti: {e_parsing}")
-
-    # 3. Salvataggio su Neo4j
+    # ==========================================
+    # 4. SALVATAGGIO IN NEO4J
+    # ==========================================
     try:
-        kg_client.salva_post(topic_originale, topic_finale, lista_ingredienti)
-        print(f"STORICO AGGIORNATO: Salvato su Neo4j!")
+        print("\n===== DEBUG DATI KG =====")
+        print(f"INGREDIENTI DIRETTI ({len(ingredienti_diretti)}):")
+        print(ingredienti_diretti)
+        print(f"\nSOTTO RICETTE ({len(sotto_ricette)}):")
+        print(sotto_ricette)
+        print("\nFONTE:")
+        print(fonte)
+        print("=========================\n")
+
+        kg_client.salva_post(
+            topic_originale=topic_originale,
+            topic_finale=topic_finale,
+            ingredienti_diretti=ingredienti_diretti,
+            sotto_ricette=sotto_ricette,
+            fonte=fonte,
+        )
+
+        print("[NEO4J] Salvataggio completato.")
+
     except Exception as e:
-        print(f"Errore su Neo4j: {str(e)}")
+        print(f"[ERRORE NEO4J] Si è verificato un problema durante il salvataggio: {e}")
 
     return {}
 
