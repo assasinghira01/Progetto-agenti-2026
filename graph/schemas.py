@@ -29,6 +29,10 @@ class ValidationResult(BaseModel):
         )
     )
 
+    documenti_db_approvati: List[int] = Field(
+        default_factory=list,
+        description="Lista contenente gli ID dei documenti del DB locale ritenuti pertinenti.",
+    )
     motivazione_qualita: str = Field(
         description=(
             "Motiva brevemente la scelta della fonte web approvata "

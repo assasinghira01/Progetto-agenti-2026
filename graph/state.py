@@ -11,6 +11,7 @@ class Blog_Cucina(MessagesState):
     rag_documents: Annotated[List[str], operator.add]
     web_documents: Annotated[List[str], operator.add]
     approved_web_documents: list[str]
+    approved_db_documents: list[str]
     post_draft: Optional[str] = None
     is_valid: Optional[bool] = None
     user_approval: Optional[str] = None

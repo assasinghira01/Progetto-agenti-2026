@@ -33,7 +33,7 @@ def krag_research_node(state: Blog_Cucina):
     messaggi = state.get("messages", [])
 
     istruzioni_mcp = SystemMessage(content=f"""
-    Sei l'agente investigatore del blog di cucina, nel nsotro blog parleremo di ricette, sagre eventi ecc. Il topic ATTUALE su cui devi lavorare è: '{topic}'.
+    Sei l'agente investigatore del blog di cucina, nel nsotro blog parleremo di ricette. Il topic ATTUALE su cui devi lavorare è: ' '.
     
     REGOLE DI COMPORTAMENTO (rispettale rigorosamente in ordine):
     1. **Prima azione assoluta verifica che il post non sia gia stato pubblicato**: chiama 'controlla_storico_post' su '{topic}'.
@@ -47,13 +47,13 @@ def krag_research_node(state: Blog_Cucina):
         
        
        - Se inizia con "OK": significa che il post è nuovo. Devi raccogliere le informazioni seguendo questo esatto flusso di ragionamento (Thought -> Action):
-         
-            Sai che il nostro database locale contiene solo ricette quindi non troverai nulla su sagre, eventi ecc. Effetua la ricerca su DB LOCALE usando 'cerca_ricetta_nel_db' solo se parliamo di ricette. Nel caso in cui
-            L'utente richieda varianti, modifiche o versioni light/leggere delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web" DEVI estrarre gli INGREDIENTI, le DOSI e il PROCEDIMENTO.
+           
+           
+            Sai che il nostro database locale contiene solo ricette classiche,  Effetua la ricerca su DB LOCALE usando 'cerca_ricetta_nel_db'. Controlla che nei dati estratti dal db  ci siano dati validi in base al '{topic}' in quel caso non effettuare la ricerca online. Nel caso in cui
+            L'utente richieda varianti, modifiche o versioni light/leggere delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web" DEVI estrarre gli INGREDIENTI, le DOSI e il PROCEDIMENTO. Usa la ricerca web nel caso in cui i dati del DB locale siano insufficienti o non pertinenti al topic richiesto.
             
-           Nel caso in cui l'utente non parli di ricette non chiamare 'cerca_ricetta_nel_db' e vai direttamente con 'esegui_ricerca_web' per raccogliere informazioni di contesto sul '{topic}' in questione.
-         
-         
+          
+
     
     3. Se ricevi "ERRORE" o "KRAG_ERRORE", segnala immediatamente il problema all'utente e chiedi istruzioni.
     """)
@@ -75,40 +75,35 @@ def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
 
     topic = state["topic_corrente"]
-
     dati_db_locale = state.get("rag_documents", [])
     dati_web_grezzi = state.get("web_documents", [])
 
-    # =========================================================
-    # 🛠️ FIX: SCOLLIAMO I DOCUMENTI WEB INCOLLATI DAL TOOL
-    # =========================================================
+    # Pulizia e separazione dei blocchi web
     dati_web = []
     for blocco in dati_web_grezzi:
         if isinstance(blocco, str) and "--- Fonte Web:" in blocco:
-            # Dividiamo la mega-stringa usando il delimitatore del tuo tool
             estratti = blocco.split("--- Fonte Web:")
             for estratto in estratti:
-                if estratto.strip():  # Ignoriamo i pezzi vuoti
+                if estratto.strip():
                     dati_web.append("--- Fonte Web:" + estratto)
         else:
             dati_web.append(blocco)
-    # Ora dati_web è una VERA lista dove len(dati_web) = numero effettivo di siti
-    # =========================================================
 
-    testo_db = (
-        "\n".join(dati_db_locale)
-        if dati_db_locale
-        else "NESSUNA RICETTA TROVATA NEL DB LOCALE"
-    )
+    # Numerazione dei documenti del DB Locale per l'LLM
+    if dati_db_locale:
+        db_numerati = []
+        for idx, doc in enumerate(dati_db_locale):
+            db_numerati.append(f"\n=== DB_DOC_{idx} ===\n{doc}\n")
+        testo_db = "\n".join(db_numerati)
+    else:
+        testo_db = "NESSUNA RICETTA TROVATA NEL DB LOCALE"
 
-    # Numerazione dei documenti web
+    # Numerazione dei documenti web per l'LLM
     if dati_web:
         web_numerati = []
         for idx, doc in enumerate(dati_web):
             web_numerati.append(f"\n=== WEB_DOC_{idx} ===\n{doc}\n")
-
         testo_web = "\n".join(web_numerati)
-
     else:
         testo_web = "NESSUN DATO COLLATERALE DAL WEB"
 
@@ -128,59 +123,83 @@ COMPITO E CRITERI DI VALUTAZIONE:
 2. SUFFICIENZA DEI DATI:
    Verifica se abbiamo abbastanza informazioni per scrivere un articolo attendibile.
 3. PERTINENZA DEL DB LOCALE:
-   Se il DB locale contiene una ricetta coerente con il topic imposta usa_db_locale=True.
-   Se contiene ricette completamente scollegate imposta usa_db_locale=False.
+   Identifica quali documenti del DB locale parlano ESATTAMENTE del topic '{topic}'.
+   Inserisci gli indici numerici (es. 0, 1) nel campo 'documenti_db_approvati'. 
+   Se contengono ricette completamente scollegate (es. cerchi Besciamella e trovi Pan di zenzero), IGNORALI.
 4. ESITO:
    - True se il topic è valido e documentato.
    - False se il topic è assurdo oppure non esistono dati utilizzabili.
 
 5. QUALITÀ FONTI WEB:
-   I documenti web sono identificati come:
-
-   WEB_DOC_0
-   WEB_DOC_1
-   WEB_DOC_2
-   ...
-
+   I documenti web sono identificati come: WEB_DOC_0, WEB_DOC_1...
    Seleziona SOLO gli ID dei documenti migliori.
-   DEVE essere scelto un solo documento. La scelta deve essere basata sulla pertinenza, autorevolezza e completezza 
-   delle informazioni rispetto al topic, evitando discrepanze e siti ripetitivi.
-   La fonte web approvata deve essere coerente con il topic.
-   Inserisci gli ID nel campo:
-   documenti_web_approvati
+   DEVE essere scelto un solo documento. La scelta deve essere basata sulla pertinenza, autorevolezza e completezza.
+   Inserisci gli ID nel campo: documenti_web_approvati
 """
 
     llm_validator = llm.with_structured_output(ValidationResult)
-
     esito = llm_validator.invoke([HumanMessage(content=prompt)])
 
     print(f" Esito Validazione: {esito.is_valid}")
     print(f" Motivazione: {esito.reasoning}")
     print(f" Usa DB Locale: {esito.usa_db_locale}")
+    print(f" Documenti DB Approvati: {esito.documenti_db_approvati}")
     print(f" Documenti Web Approvati: {esito.documenti_web_approvati}")
-    print(f" Motivazione Qualità: {esito.motivazione_qualita}")
 
-    # PRUNING DELLO STATO
+    # =========================================================
+    # PRUNING DELLO STATO (FILTRAGGIO MATEMATICO)
+    # =========================================================
 
+    # 1. Filtriamo i documenti WEB
     dati_web_filtrati = []
-
     for idx in esito.documenti_web_approvati:
         if 0 <= idx < len(dati_web):
             dati_web_filtrati.append(dati_web[idx])
 
-    dati_db_filtrati = dati_db_locale if esito.usa_db_locale else []
+    # 2. Filtriamo i documenti del DB LOCALE
+    dati_db_filtrati = []
+
+    if not esito.usa_db_locale:
+        print("[VALIDATORE] DB locale non pertinente.")
+    else:
+        print("[VALIDATORE] Estraggo solo le ricette pertinenti...")
+
+        for idx in esito.documenti_db_approvati:
+
+            if 0 <= idx < len(dati_db_locale):
+
+                doc = dati_db_locale[idx]
+
+                # Caso mega-chunk con più ricette
+                if "Ricetta:" in doc:
+
+                    blocchi = doc.split("Ricetta:")
+
+                    for blocco in blocchi:
+
+                        if topic.lower().strip() in blocco.lower():
+
+                            dati_db_filtrati.append("Ricetta: " + blocco.strip())
+
+            else:
+                # Documento singolo normale
+                if topic.lower().strip() in doc.lower():
+                    dati_db_filtrati.append(doc)
 
     direttiva = (
-        f"Fonte web selezionata dal revisore: "
-        f"{esito.documenti_web_approvati}. "
+        f"Fonte web: {esito.documenti_web_approvati}. "
+        f"Fonte DB: {esito.documenti_db_approvati}. "
         f"Motivazione: {esito.motivazione_qualita}"
     )
-    print(f" Dati web filtrati:\n{dati_web_filtrati} ")
+
+    print(f" Dati web finali passati al writer: {len(dati_web_filtrati)} documenti")
+    print(f" Dati DB finali passati al writer: {len(dati_db_filtrati)} documenti")
+
     return {
         "is_valid": esito.is_valid,
         "valutazione_qualita": direttiva,
         "approved_web_documents": dati_web_filtrati,
-        "rag_documents": dati_db_filtrati,
+        "approved_db_documents": dati_db_filtrati,
     }
 
 
