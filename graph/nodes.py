@@ -184,6 +184,7 @@ COMPITO E CRITERI DI VALUTAZIONE:
     }
 
 
+# writer node: sintetizza le informazioni approvate e scrivi la bozza del post in markdown, con attenzione alla distinzione tra ingredienti diretti e sotto-ricette, e alla gerarchia degli ingredienti. Applica eventuali feedback umani ricevuti per correggere o migliorare la bozza prima di generare il markdown finale.
 def writer_node(state: Blog_Cucina):
     print("\n--- [NODO 4: WRITER (Sintesi e Grounding)] ---")
     topic = state["topic_corrente"]
