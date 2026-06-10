@@ -18,14 +18,18 @@ def main():
     # Inizializziamo o carichiamo il database vettoriale locale
     inizializza_vector_db()
 
-    richiesta = input(
-        "\nDi cosa vorresti parlare oggi? (es. 'Scrivi un post sulla caponata'):\n> "
+    print(
+        "\nPremi INVIO per far generare al Copilot il piano editoriale in automatico,"
     )
-    if not richiesta.strip():
-        print("Input vuoto. Terminazione del programma.")
-        return
+    richiesta = input(
+        "oppure scrivi una direttiva (es. 'Voglio fare un post sui dolci'):\n> "
+    )
 
-    # Creiamo un ID di sessione univoco (Thread) per mantenere attiva la memoria del grafo
+    # Se l'utente preme solo invio, diamo un comando standard per innescare il Planner
+    if not richiesta.strip():
+        richiesta = "Analizza il Knowledge Graph e proponi il prossimo post editoriale."
+
+    # Creiamo un ID di sessione univoco (Thread) per mantenere attiva la memoria
     thread_id = str(uuid.uuid4())
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -36,12 +40,6 @@ def main():
         for nome_nodo, var_modificate in event.items():
             if nome_nodo != "__root__":
                 print(f"[LOG GRAFO] Il nodo '{nome_nodo}' ha terminato l'esecuzione.")
-
-                # Controllo difensivo per evitare il crash se var_modificate è None o vuoto
-                if var_modificate is not None and "topic_corrente" in var_modificate:
-                    print(
-                        f" -> [UPDATE] Topic corrente impostato a: {var_modificate['topic_corrente']}"
-                    )
 
     # --- LOOP DINAMICO DI GESTIONE INTERRUPT ---
     while True:
@@ -55,31 +53,47 @@ def main():
 
         # Estraggiamo i dati correnti memorizzati nello stato del thread
         valori_stato = stato_grafo.values
+        piano_editoriale = valori_stato.get("piano_strutturato")
         bozza_articolo = valori_stato.get("post_draft")
-        messaggi = valori_stato.get("messages", [])
+        # messaggi = valori_stato.get("messages", [])
 
-        # STRATEGIA DI DISCRIMINAZIONE DELL'INTERRUPT:
-        # Scenario A: Se NON è ancora presente la bozza, siamo fermi alla scelta della variante!
-        if not bozza_articolo:
-            ultimo_messaggio_agente = (
-                messaggi[-1].content if messaggi else "Nessuna opzione visualizzabile."
-            )
+        if piano_editoriale and not bozza_articolo:
             print("\n----------------------------------------------------")
-            print("L'AGENTE CHIEDE DI SCEGLIERE UNA VARIANTE STORICA:")
+            print("IL COPILOT HA GENERATO LA STRATEGIA EDITORIALE:")
             print("----------------------------------------------------")
-            print(ultimo_messaggio_agente)
+
+            # Formattiamo la stampa del piano Pydantic/JSON
+            for i, post in enumerate(piano_editoriale):
+                print(
+                    f"[{i+1}] Topic: {post['topic_ricetta']} | Tipo: {post['tipo_post']}"
+                )
+                print(f"    Motivo: {post['giustificazione']}")
 
             feedback_utente = input(
-                "\nQuale variante decidi di sviluppare? (Digita la tua scelta):\n> "
+                "\nApprovi questo piano? (Digita 'Approvo', oppure indica le modifiche):\n> "
             )
-
-            # Sblocchiamo inviando la scelta e forziamo l'aggiornamento di human_feedback
             comando_sblocco = Command(
                 resume=feedback_utente, update={"human_feedback": feedback_utente}
             )
 
-        # Scenario B: Se la bozza è presente, siamo alla revisione finale del testo del post!
-        else:
+            """ # SCENARIO B: Il Planner è approvato, ma l'agente chiede quale "Variante" della ricetta usare
+            elif not bozza_articolo and not piano_editoriale: 
+            
+                ultimo_messaggio_agente = messaggi[-1].content if messaggi else "Nessuna opzione."
+                print("\n----------------------------------------------------")
+                print("L'AGENTE CHIEDE DI SCEGLIERE UNA VARIANTE STORICA:")
+                print("----------------------------------------------------")
+                print(ultimo_messaggio_agente)
+
+                feedback_utente = input(
+                    "\nQuale variante decidi di sviluppare? (Digita la tua scelta):\n> "
+                )
+                comando_sblocco = Command(
+                    resume=feedback_utente, update={"human_feedback": feedback_utente}
+                )
+"""
+        # SCENARIO C: La bozza del testo è pronta, revisione finale prima della pubblicazione
+        elif bozza_articolo:
             print("\n----------------------------------------------------")
             print("BOZZA FINALE GENERATA DALL'LLM PER IL TUO BLOG:")
             print("----------------------------------------------------")
@@ -87,10 +101,8 @@ def main():
             print("----------------------------------------------------")
 
             feedback_utente = input(
-                "\nInserisci il tuo verdetto (es. 'Approvo', oppure indica le modifiche):\n> "
+                "\nInserisci il tuo verdetto (es. 'Approvo', oppure indica le modifiche al testo):\n> "
             )
-
-            # Sblocchiamo passando il feedback che verrà consumato da human_review_node
             comando_sblocco = Command(
                 resume=feedback_utente, update={"human_feedback": feedback_utente}
             )
@@ -104,15 +116,6 @@ def main():
                     print(
                         f"[LOG GRAFO] Ripresa attività. Completato nodo: '{nome_nodo}'"
                     )
-
-                    # Controllo difensivo analogo anche in fase di ripresa dello stream
-                    if (
-                        var_modificate is not None
-                        and "topic_corrente" in var_modificate
-                    ):
-                        print(
-                            f" -> [UPDATE] Il topic è cambiato in: '{var_modificate['topic_corrente']}'"
-                        )
 
     # --- CONCLUSIONE DEL FLUSSO ---
     stato_finale = app.get_state(config)

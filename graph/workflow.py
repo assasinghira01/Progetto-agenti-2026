@@ -1,6 +1,9 @@
 from langgraph.graph import StateGraph, START, END
+from graph import state
+from graph.schemas import PianoEditoriale
 from graph.state import Blog_Cucina
 from langchain_core.messages import AIMessage
+from config import llm
 from graph.nodes import (
     planner_node,
     krag_research_node,
@@ -23,7 +26,6 @@ nodo_strumenti = ToolNode(lista_tools)
 def smista_documenti_node(state: Blog_Cucina):
     print("\n--- [NODO INTERMEDIO: SMISTAMENTO DOCUMENTI] ---")
     ultimo_messaggio = state["messages"][-1]
-
     # Controlliamo quale tool ha appena risposto per salvare il testo nel cassetto corretto
     if hasattr(ultimo_messaggio, "name"):
         if ultimo_messaggio.name == "cerca_ricetta_nel_db":
@@ -37,6 +39,27 @@ def smista_documenti_node(state: Blog_Cucina):
 
 
 # --- 3. FUNZIONI DI ROUTING CONDIZIONALE (ROUTER) ---
+def router_pianificazione(state: Blog_Cucina):
+    """Decide se il planner ha già generato un piano editoriale o se deve ancora farlo."""
+    last_msg = state["messages"][-1]
+    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+        print(f"  L'Agente richiede i tool: {[t['name'] for t in last_msg.tool_calls]}")
+        return "tools"
+    print(
+        " L'Agente ha concluso la pianificazione. Passo all'estrazione del piano editoriale."
+    )
+    return "estrai_piano"
+
+
+def estrai_piano_node(state: Blog_Cucina):
+    ultimo_testo = state["messages"][-1].content
+    llm_structured = llm.with_structured_output(PianoEditoriale)
+    piano = llm_structured.invoke(ultimo_testo)
+    print("\n--- PIANO EDITORIALE ESTRATTO ---")
+    for i, post in enumerate(piano.sequenza_post):
+        print(f"[{i+1}] Topic: {post.topic_ricetta} | Tipo: {post.tipo_post}")
+        print(f"    Giustificazione: {post.giustificazione}")
+    return {"piano_editoriale": piano.sequenza_post, "indice_post_corrente": 0}
 
 
 def router_ricerca(state: Blog_Cucina):
@@ -53,6 +76,17 @@ def router_ricerca(state: Blog_Cucina):
     # Se non ci sono tool_calls, l'agente ha finito di raccogliere dati
     print(" L'Agente ha concluso la ricerca. Passo al validatore.")
     return "validator"
+
+
+def router_dopo_tools(state: Blog_Cucina):
+    """
+    Decide a quale agente restituire i risultati dei tool.
+    """
+    if not state.get("piano_editoriale"):
+        print(" [ROUTING] Risultati del tool inviati al Planner.")
+        return "planner"
+    print(" [ROUTING] Risultati del tool inviati allo smistamento documenti.")
+    return "smista_documenti"
 
 
 def after_tools(state: Blog_Cucina):
@@ -101,10 +135,23 @@ def check_human_approval(state: Blog_Cucina):
         return "writer"
 
 
+def altri_post_da_fare(state):
+
+    indice = state["indice_post_corrente"]
+
+    totale = len(state["piano_editoriale"])
+
+    if indice < totale:
+        return "research"
+
+    return END
+
+
 builder = StateGraph(Blog_Cucina)
 
 # Registrazione dei nodi
 builder.add_node("planner", planner_node)
+builder.add_node("estrai_piano", estrai_piano_node)
 builder.add_node("research", krag_research_node)
 builder.add_node("validator", validator_node)
 builder.add_node("writer", writer_node)
@@ -116,15 +163,25 @@ builder.add_node("aggiorna_topic", aggiorna_topic_node)
 
 # Definizione degli archi standard
 builder.add_edge(START, "planner")
-builder.add_edge("planner", "research")
-
+builder.add_conditional_edges(
+    "planner",
+    router_pianificazione,
+    {"tools": "tools", "estrai_piano": "estrai_piano"},
+)
 builder.add_conditional_edges(
     "research",
     router_ricerca,
     {"tools": "tools", "validator": "validator"},
 )
 
-builder.add_edge("tools", "smista_documenti")
+builder.add_conditional_edges(
+    "tools",
+    router_dopo_tools,
+    {
+        "planner": "planner",
+        "smista_documenti": "smista_documenti",
+    },
+)
 
 builder.add_conditional_edges(
     "smista_documenti",

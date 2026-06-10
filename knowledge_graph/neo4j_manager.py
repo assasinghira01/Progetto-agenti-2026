@@ -7,6 +7,33 @@ class CucinaKnowledgeGraph:
     def __init__(self, uri, user, password):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
+    def get_ultimi_post_pubblicati(self, limite: int = 5):
+        """
+        Recupera gli ultimi N post pubblicati dal blog, ordinati dal più recente.
+        Restituisce una lista di dizionari con titolo, data e ricetta trattata.
+        """
+        query_cypher = """
+        MATCH (p:Post)-[:PARLA_DI]->(r:Ricetta)
+        RETURN p.titolo AS titolo, p.data AS data, r.name AS topic_trattato
+        ORDER BY p.data DESC
+        LIMIT $limite
+        """
+
+        with self.driver.session() as session:
+            risultati = session.run(query_cypher, limite=limite)
+
+            ultimi_post = []
+            for record in risultati:
+                ultimi_post.append(
+                    {
+                        "titolo": record["titolo"],
+                        "data": record["data"],
+                        "topic_trattato": record["topic_trattato"],
+                    }
+                )
+            print(f"[NEO4J] Recuperati {ultimi_post} ultimi post pubblicati.")
+            return ultimi_post
+
     def controlla_cronologia_post(self, topic: str):
         """
         Verifica se il piatto o una sua variante ha già un Post associato.

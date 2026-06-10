@@ -2,7 +2,11 @@ from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.types import interrupt
 from config import llm, llm_con_tools
-from graph.schemas import RecipeDraft, TopicExtraction, ValidationResult
+from graph.schemas import (
+    RecipeDraft,
+    TopicExtraction,
+    ValidationResult,
+)
 from graph.state import Blog_Cucina
 from knowledge_graph.neo4j_manager import kg_client
 from typing import Optional
@@ -13,18 +17,20 @@ llm_structured = llm.with_structured_output(TopicExtraction)
 
 def planner_node(state: Blog_Cucina):
     print("\n--- [NODO 1: PLANNER (LLM)] ---")
-    input_utente = state["input_utente"]
 
-    # 1. Estraiamo il topic principale
-    risultato = llm_structured.invoke(
-        [HumanMessage(content=f"Estrai il topic: {input_utente}")]
-    )
-    topic_estratto = risultato.topic.strip().capitalize()
+    prompt = SystemMessage(content=f"""
+    Sei un planner editoriale per un blog di cucina, tratti post sulle ricette,eventi(es. sagre, fiere ecc...) 
+    imminenti in Italia relativi ai tuoi argomenti,progressi/novità interessanti legati al dominio. 
+    Classifica i topic in 3 categorie: "Ricette", "Eventi", "Novità".
+    Il tuo compito è pianificare i prossimi argomenti da trattare, 
+    basandoti sui post già pubblicati evitando le ridondanze e variando il tipo di topic in modo da non annoiare i nostri lettori.
+    REGOLA: EVITA DI CERCARE ONLINE INFORMAZIONI SUI TOPIC CHE PROPONI, DEVI BASARTI SOLO SUL KNOWLEDGE GRAPH INTERNO PER VERIFICARE CHE NON SIANO GIÀ STATI TRATTATI RECENTEMENTE.
+                           """)
+    messaggi_da_inviare = [prompt, HumanMessage(content="Inizia la ricerca...")]
+    risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
 
-    print(f" Topic identificato: {topic_estratto}")
-
-    # 2. Scriviamo il topic nello stato e passiamo la palla al nodo di ricerca
-    return {"topic_corrente": topic_estratto}
+    print(f"[PLANNER] Risposta LLM: {risposta_llm}")
+    return {"messages": risposta_llm}
 
 
 def krag_research_node(state: Blog_Cucina):
@@ -454,7 +460,8 @@ def kg_update_node(state: Blog_Cucina):
     except Exception as e:
         print(f"[ERRORE NEO4J] Si è verificato un problema durante il salvataggio: {e}")
 
-    return {}
+    return {}  # "indice_post_corrente":
+    # state["indice_post_corrente"] + 1}
 
 
 def aggiorna_topic_node(state: Blog_Cucina):

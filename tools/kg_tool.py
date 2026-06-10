@@ -15,6 +15,25 @@ kg_client = CucinaKnowledgeGraph(
 
 
 @tool
+def get_ultimi_post():
+    """
+    Torna gli ultimi post pubblicati sul blog per evitare ripetizioni.
+    Restituisce l'elenco dei titoli dei post recenti.
+    """
+    # Recuperiamo la lista dei post (restituisce una lista di dict)
+    risultati = kg_client.get_ultimi_post_pubblicati(limite=30)
+
+    if not risultati:
+        return "Nessun post precedente è stato pubblicato nel blog. Il blog è vuoto."
+
+    # Estraiamo i titoli e formattiamoli in una stringa pulita
+    elenco_titoli = [post["titolo"] for post in risultati]
+    stringa_post = ", ".join(elenco_titoli)
+
+    return f"Ultimi post trovati nel blog: {stringa_post}"
+
+
+@tool
 def controlla_storico_post(topic: str) -> str:
     """
     Verifica se il piatto è già stato pubblicato.

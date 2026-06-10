@@ -1,7 +1,7 @@
 import operator
 from typing import List, Optional, Annotated
 from langgraph.graph import MessagesState
-from graph.schemas import RecipeDraft
+from graph.schemas import PostPianificato, RecipeDraft
 
 
 class Blog_Cucina(MessagesState):
@@ -17,3 +17,5 @@ class Blog_Cucina(MessagesState):
     user_approval: Optional[str] = None
     human_feedback: Optional[str] = None
     recipe_draft: Optional[RecipeDraft] = None
+    piano_editoriale: list[PostPianificato] = []
+    indice_post_corrente: int = 0

@@ -1,5 +1,23 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Literal
+
+
+class PostPianificato(BaseModel):
+    topic: str = Field(
+        description="Il nome specifico dell'argomento (es. 'Cassata Siciliana', 'Sagra del Pistacchio a Bronte', 'Nuove farine')"
+    )
+    categoria: Literal["Ricette", "Eventi", "Novità"] = Field(
+        description="La categoria del post scelta."
+    )
+    giustificazione: str = Field(
+        description="Il motivo logico per cui hai scelto questo topic, dimostrando che non è un duplicato."
+    )
+
+
+class PianoEditoriale(BaseModel):
+    sequenza_post: List[PostPianificato] = Field(
+        description="La lista ordinata di post pianificati."
+    )
 
 
 class ValidationResult(BaseModel):
