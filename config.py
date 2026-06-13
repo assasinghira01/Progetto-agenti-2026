@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from tools.think_tool import think_tool
 from tools.search_tool import esegui_ricerca_web
 from tools.rag_tool import cerca_ricetta_nel_db
 from tools.kg_tool import (
@@ -25,8 +26,9 @@ lista_tools = [
     controlla_storico_post,
     krag_suggerisci_varianti,
     chiedi_variante,
+    think_tool,
 ]
 
 # 2. Creiamo un "Super-Cervello" dotato di mani.
 # llm_con_tools è la variabile che useremo nel nostro Nodo di Ricerca!
-llm_con_tools = llm.bind_tools(lista_tools)
+llm_con_tools = llm.bind_tools(lista_tools, parallel_tool_calls=False)

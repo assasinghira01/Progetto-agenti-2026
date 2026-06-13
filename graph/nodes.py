@@ -1,5 +1,11 @@
-from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, HumanMessage
+from langgraph.types import Command
+from langchain_core.messages import (
+    RemoveMessage,
+    SystemMessage,
+    HumanMessage,
+    ToolMessage,
+    filter_messages,
+)
 from langgraph.types import interrupt
 from config import llm, llm_con_tools
 from graph.schemas import (
@@ -9,28 +15,330 @@ from graph.schemas import (
 )
 from graph.state import Blog_Cucina
 from knowledge_graph.neo4j_manager import kg_client
-from typing import Optional
 
 # per il planner
 llm_structured = llm.with_structured_output(TopicExtraction)
 
 
 def planner_node(state: Blog_Cucina):
+
     print("\n--- [NODO 1: PLANNER (LLM)] ---")
+    input = state["input_utente"]
+    messaggi = state["messages"]
+    feedback = state.get("human_feedback")
 
-    prompt = SystemMessage(content=f"""
-    Sei un planner editoriale per un blog di cucina, tratti post sulle ricette,eventi(es. sagre, fiere ecc...) 
-    imminenti in Italia relativi ai tuoi argomenti,progressi/novità interessanti legati al dominio. 
-    Classifica i topic in 3 categorie: "Ricette", "Eventi", "Novità".
-    Il tuo compito è pianificare i prossimi argomenti da trattare, 
-    basandoti sui post già pubblicati evitando le ridondanze e variando il tipo di topic in modo da non annoiare i nostri lettori.
-    REGOLA: EVITA DI CERCARE ONLINE INFORMAZIONI SUI TOPIC CHE PROPONI, DEVI BASARTI SOLO SUL KNOWLEDGE GRAPH INTERNO PER VERIFICARE CHE NON SIANO GIÀ STATI TRATTATI RECENTEMENTE.
-                           """)
-    messaggi_da_inviare = [prompt, HumanMessage(content="Inizia la ricerca...")]
-    risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
+    if input == "PIANIFICAZIONE_AUTOMATICA":
 
-    print(f"[PLANNER] Risposta LLM: {risposta_llm}")
-    return {"messages": risposta_llm}
+        testo_prompt = """
+        # Ruolo
+    Sei un planner editoriale per un blog di cucina dove vengono pubblicati dei post sulla preparazione di piatti. 
+    
+    # REGOLE DI RAGIONAMENTO (OBBLIGATORIE):
+    Il tuo flusso di lavoro deve essere rigorosamente questo:
+    1. Chiama un tool (es. get_ultimi_post o controlla_storico_post).
+    2. APPENA RICEVI LA RISPOSTA DEL TOOL, prima di fare qualsiasi altra cosa o chiamare altri tool di ricerca, DEVI chiamare il `think_tool`.
+    3. Nel `think_tool`, spiega cosa hai appena scoperto e decidi qual è il tuo prossimo passo logico.
+    4. Ripeti questo ciclo (Ricerca -> Think -> Ricerca -> Think) finché non hai 3 topic approvati. Non chiamare tool di ricerca in sequenza senza usare il think_tool in mezzo.
+    5. motiva tutto cio che fai nel think_tool, è fondamentale per la tua capacità di pianificare in modo intelligente e strategico.
+    
+    
+    ## FASI DI LAVORO (Seguile in questo ordine esatto):
+
+    FASE 1 - RECUPERO STORICO: 
+    Chiama il tool `get_ultimi_post` per capire cosa è stato pubblicato di recente. (Non richiamarlo più di una volta). Usa il `think_tool` per riflettere sui risultati.
+
+    FASE 2 - IDEAZIONE INTERNA E VERIFICA (IL CUORE DEL TUO LAVORO):
+    NON generare ancora il piano finale. Nella tua mente, elabora  SOLO 3 nuovi topic (variando le categorie, se sono state pubblicati due primi e una secondo puoi generare un antipasto o un dessert, se una 
+    tipolgia non ha publicata dai priorita a quest'ultima, se non sono stati pubblicati piati vegani  dai priorita ad un piatto vegano. L'obbiettivo è creare contenuti unici e rilevanti per i lettori del blog non annoiandoli).
+    Per **OGNUNO** di questi 3 topic, è ASSOLUTAMENTE OBBLIGATORIO chiamare il tool `controlla_storico_post` SU ognuno di essi, SEI OBBLIGATO A FARLO A PRESCINDERE. 
+    - Se il tool risponde "BLOCCATO", scarta l'idea, usa il `think_tool` per riflettere sull'errore, e proponi un piatto diverso verificandolo di nuovo.
+    - Se il tool risponde "OK", il topic è approvato.
+
+    FASE 3 - GENERAZIONE DEL PIANO:
+    SOLO DOPO aver ottenuto 3 risposte "OK" dal tool `controlla_storico_post`, puoi procedere a generare il testo finale del piano editoriale con i 3 topic approvati.
+
+    ## Formato dei topic (REGOLA FERREA)
+    - **Singola Preparazione:** Il topic deve essere una ricetta reale, specifica e SINGOLA. 
+    - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+    - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
+    - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
+    - ✅ CORRETTO: "Pollo al limone"
+    - ✅ CORRETTO: "Verdure grigliate"
+    - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+    - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
+    
+    """
+
+        if feedback and feedback.startswith("rigenera_con_blacklist:"):
+
+            lista_nera = feedback.split(":")[1]
+
+            print(
+                f"   [Planner] Rilevato feedback 'rigenera'. Topic bloccati: {lista_nera}"
+            )
+
+            testo_prompt += f"""
+            
+            --- FEEDBACK UTENTE (PIANO RIFIUTATO) ---
+            ATTENZIONE: Il piano editoriale precedente è stato RIFIUTATO. 
+            L'utente ha esplicitamente scartato i seguenti topic: {lista_nera}.
+            
+            REGOLA ASSOLUTA: NON PROPORRE NESSUNO DI QUESTI TOPIC SCARTATI. 
+            Devi generare 3 idee COMPLETAMENTE DIVERSE.
+            
+            --- REGOLE DI WORKFLOW PER LA RIGENERAZIONE ---
+            1. Nel tuo PRIMO utilizzo del `think_tool` in questo nuovo ciclo, DEVI dichiarare esplicitamente di aver ricevuto il feedback negativo e menzionare i topic scartati ({lista_nera}) che eviterai.
+            2. Chiama il tool `get_ultimi_post` per capire cosa è stato pubblicato di recente. (Non richiamarlo più di una volta).
+            3. Continua a usare il `think_tool` dopo ogni controllo con `controlla_storico_post`. 
+            4. Usa la dicitura "STATO: CONTINUO" finché non trovi 3 nuove idee approvate dal tool.
+            5. Usa la dicitura "STATO: FINITO" solo alla fine, quando hai i 3 topic definitivi.
+            
+            --- FORMATO DEI TOPIC (REGOLA FERREA) ---
+            - Singola Preparazione: Il topic deve essere una ricetta reale, specifica e SINGOLA. 
+            - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+              - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
+              - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
+              - ✅ CORRETTO: "Pollo al limone"
+              - ✅ CORRETTO: "Verdure grigliate"
+              - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+            
+            [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE pianificare internamente.
+        
+                        """
+
+        if feedback and feedback.startswith("modifica:"):
+
+            parti = feedback.split("|")
+            istruzioni = parti[0].replace("modifica:", "").strip()
+
+            piano_salvato = ""
+            blacklist_salvata = ""
+
+            for p in parti:
+                if p.startswith("piano:"):
+                    piano_salvato = p.replace("piano:", "").strip()
+                elif p.startswith("blacklist:"):
+                    blacklist_salvata = p.replace("blacklist:", "").strip()
+
+            print(
+                f"   [Planner] Rilevato feedback 'modifica'. Istruzioni: {istruzioni}, {piano_salvato}, {blacklist_salvata}"
+            )
+            testo_prompt += f"""
+            
+            --- FEEDBACK UTENTE (RICHIESTA DI MODIFICA) ---
+            L'utente ha richiesto le seguenti MODIFICHE SPECIFICHE al piano: 
+            "{istruzioni}"
+            
+            IL PIANO PRECEDENTE ERA COMPOSTO DA QUESTI 3 TOPIC: {piano_salvato}
+            
+            REGOLA MATEMATICA E LOGICA ASSOLUTA:
+            1. Analizza la richiesta dell'utente: identifica QUALE topic deve essere eliminato e COSA l'utente vuole al suo posto (presta estrema attenzione se chiede una specifica categoria come "contorno", "primo", "pesce", ecc.)
+            devi quindi basarti su "{istruzioni}". REGOLA NON DEVI MAI COP
+            2. MANTIENI INTATTI E NON CANCELLARE gli altri topic del piano precedente che non sono stati nominati per l'eliminazione.
+            3. Il NUOVO topic generato DEVE RISPETTARE ALLA LETTERA la categoria o l'ingrediente richiesto dall'utente nella modifica.
+            4. Alla fine del processo, il piano finale DEVE contenere rigorosamente: i topic vecchi mantenuti + il nuovo topic approvato (Totale esatto: 3 topic).
+            """
+
+            if blacklist_salvata:
+                testo_prompt += f"""
+            Inoltre, ricorda che nei cicli precedenti l'utente aveva GIA' SCARTATO questi topic: {blacklist_salvata}. 
+            NON DEVI assolutamente riproporli.
+            """
+
+            if blacklist_salvata:
+                testo_prompt += f"""
+            Inoltre, ricorda che nei cicli precedenti l'utente aveva GIA' SCARTATO questi topic: {blacklist_salvata}. 
+            NON DEVI assolutamente riproporli.
+            """
+
+            testo_prompt += """
+            --- REGOLE DI WORKFLOW PER LA MODIFICA ---
+            1. Nel tuo PRIMO `think_tool`, dichiara: quali topic tieni, quale elimini, e QUANTI nuovi topic devi cercare (es. "Devo cercare 1 nuovo topic").
+            2. Usa il tool `get_ultimi_post` per controllare i duplicati recenti.
+            3. Usa `controlla_storico_post` SOLO per verificare i NUOVI topic che stai introducendo.
+            4. 🚨 REGOLA DI STOP (IMPORTANTISSIMA): In ogni `think_tool`, DEVI FARE IL CONTEGGIO ESPLICITO. Scrivi letteralmente: "Topic mantenuti: X. Nuovi topic approvati: Y. Totale: Z". 
+            5. Appena il tuo Totale Z arriva a 3, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO". È severamente vietato cercare un quarto topic.
+                        
+            
+            
+            [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE pianificare internamente.
+            """
+
+        prompt = SystemMessage(content=testo_prompt)
+
+    else:
+        prompt = SystemMessage(content=f"""
+        # Ruolo
+    Sei un planner editoriale per un blog di cucina. Il tuo compito in questa sessione è valutare e validare una SINGOLA proposta di ricetta inviata dall'utente. 
+    
+    # REGOLE DI RAGIONAMENTO (OBBLIGATORIE):
+    Il tuo flusso di lavoro deve essere rigorosamente questo:
+    1. Chiama un tool (es. controlla_storico_post o proponi_variante).
+    2. APPENA RICEVI LA RISPOSTA DEL TOOL, prima di fare qualsiasi altra cosa, DEVI chiamare il `think_tool`.
+    3. Nel `think_tool`, spiega cosa hai appena scoperto e decidi qual è il tuo prossimo passo logico. Termina con "STATO: CONTINUO" se stai ancora lavorando.
+    4. Ripeti questo ciclo (Ricerca/Azione -> Think -> Ricerca/Azione -> Think) finché non ottieni l'approvazione definitiva. Non chiamare tool in sequenza senza usare il think_tool in mezzo.
+    5. Motiva tutto ciò che fai nel think_tool, è fondamentale per la tua capacità di pianificare in modo intelligente e strategico.
+    
+    
+    ## FASI DI LAVORO (Seguile in questo ordine esatto):
+
+    FASE 1 - VERIFICA DEL TOPIC PROPOSTO: 
+    L'utente ha proposto una specifica ricetta. Usa immediatamente il tool `controlla_storico_post` su questa ricetta per verificare se ha già un post associato nel Knowledge Graph.
+    - Se la risposta inizia con "OK": il topic è nuovo e va bene. Passa alla Fase 3.
+    - Se la risposta inizia con "BLOCCATO": significa che il post è già stato pubblicato di recente. Passa alla Fase 2.
+
+    FASE 2 - GESTIONE DEL BLOCCO E VARIANTE (SOLO SE NECESSARIO):
+    Se il topic originale è bloccato, usa il `think_tool` per riflettere sull'errore. 
+    Successivamente, DEVI chiamare il tool `proponi_variante` per generare una variante interessante e coerente con la richiesta iniziale dell'utente.
+    Una volta ottenuta la variante, è ASSOLUTAMENTE OBBLIGATORIO ripetere il controllo chiamando di nuovo `controlla_storico_post` sulla nuova variante.
+
+    FASE 3 - CONCLUSIONE DELLA PIANIFICAZIONE (REGOLA DI STOP ASSOLUTA):
+    Appena ottieni un "OK" definitivo per il topic (sia esso l'originale proposto dall'utente o la tua variante approvata), LA FASE DI PIANIFICAZIONE È FINITA!!!!
+    Devi OBBLIGATORIAMENTE fare un'ultima chiamata al `think_tool` in cui confermi il piatto e scrivi ESATTAMENTE queste parole: "Topic approvato. STATO: FINITO".
+    È severamente vietato continuare a cercare, riflettere o proporre varianti dopo aver raggiunto l' "OK".
+
+    ## Formato dei topic (REGOLA FERREA)
+    - **Singola Preparazione:** Il topic (o la variante) deve essere una ricetta reale, specifica e SINGOLA. 
+    - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+    - NOMI SPECIFICI: NON USARE MAI nomi generici o nomi di categorie come titolo della ricetta. Devi usare il nome esatto del piatto.
+      - ❌ SBAGLIATO (VIETATO): "Variante a base di pesce", "Un dolce al cioccolato", "Contorno di verdure"
+      - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
+      - ✅ CORRETTO: "Spaghetti alle vongole", "Caprese al limone", "Zucchine trifolate", "Pollo al limone"
+    - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
+    
+    """)
+
+    if messaggi and isinstance(messaggi[-1], ToolMessage):
+        risposta_llm = llm_con_tools.invoke([prompt] + messaggi)
+        return {"messages": [risposta_llm], "nodo_chiamante": "planner"}
+
+    if input == "PIANIFICAZIONE_AUTOMATICA":
+
+        messaggi_da_inviare = [
+            prompt,
+            HumanMessage(content="Inizia la ricerca..."),
+        ]
+
+        risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
+
+        return {"messages": [risposta_llm], "nodo_chiamante": "planner"}
+
+    else:
+        input_utente = state["input_utente"]
+
+        # 1. Estraiamo il topic principale
+
+        risultato = llm_structured.invoke(
+            [HumanMessage(content=f"Estrai il topic: {input_utente}")]
+        )
+        topic_estratto = risultato.topic.strip().capitalize()
+
+        print(f" Topic identificato: {topic_estratto}")
+
+        messaggi_da_inviare = [
+            prompt,
+            HumanMessage(
+                content=f"Controlla se il topic '{topic_estratto}' ha già un post associato."
+            ),
+        ]
+
+        risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
+
+        return {
+            "messages": [risposta_llm],
+            "topic_corrente": [topic_estratto],
+            "nodo_chiamante": "planner",
+        }
+
+
+def human_review_planner(state: Blog_Cucina):
+    print("\n--- [NODO: HUMAN REVIEW PLANNER] ---")
+
+    feedback = interrupt({"msg": "In attesa di revisione umana"})
+
+    print(f" Feedback ricevuto: {feedback}")
+    piano = state.get("piano_editoriale")
+    if feedback == "APPROVA":
+        topic = piano.sequenza_post[0].topic
+        return Command(
+            update={
+                "topic_corrente": [topic],
+                "human_feedback": "approvato",
+                "piano_editoriale": piano,
+            },
+            goto="research",
+        )
+    elif feedback == "RIGENERA":
+        nuovi_scartati = [post.topic for post in piano.sequenza_post]
+
+        # Recuperiamo l'eventuale blacklist precedente dallo stato
+        vecchio_feedback = state.get("human_feedback", "")
+
+        vecchia_blacklist = []
+        if vecchio_feedback and vecchio_feedback.startswith("rigenera_con_blacklist:"):
+
+            stringa_vecchi = vecchio_feedback.split(":")[1]
+
+            vecchia_blacklist = [t.strip() for t in stringa_vecchi.split(",")]
+
+        blacklist_totale = vecchia_blacklist + [
+            t for t in nuovi_scartati if t not in vecchia_blacklist
+        ]
+
+        topic_scartati_aggiornati = ", ".join(blacklist_totale)
+
+        # Cancelliamo la cronologia dei messaggi per fare spazio al nuovo ragionamento
+        messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state["messages"]]
+
+        return Command(
+            update={
+                "human_feedback": f"rigenera_con_blacklist:{topic_scartati_aggiornati}",
+                "piano_editoriale": None,
+                "messages": messaggi_da_cancellare,
+            },
+            goto="planner",
+        )
+
+    elif feedback == "MODIFICA":
+        # Chiediamo all'utente cosa vuole cambiare
+
+        istruzioni_modifica = input(
+            "\n📝 Scrivi le tue istruzioni di modifica (es. 'Sostituisci il dolce con un antipasto'): "
+        )
+
+        # recuperiamo i topic precedenti
+        piano_attuale = state.get("piano_editoriale")
+        topic_attuali = (
+            ", ".join([post.topic for post in piano_attuale.sequenza_post])
+            if piano_attuale
+            else ""
+        )
+
+        # Recuperiamo la blacklist precedente per non perderla
+        vecchio_feedback = state.get("human_feedback", "")
+        vecchia_blacklist = ""
+
+        # Estraiamo la blacklist sia che provenga da un vecchio RIGENERA sia da un vecchia MODIFICA
+        if "rigenera_con_blacklist:" in vecchio_feedback:
+            vecchia_blacklist = vecchio_feedback.split("rigenera_con_blacklist:")[1]
+        elif "|blacklist:" in vecchio_feedback:
+            vecchia_blacklist = vecchio_feedback.split("|blacklist:")[1]
+
+        # Costruiamo il nuovo feedback unendo istruzioni e vecchia blacklist
+        nuovo_feedback = f"modifica:{istruzioni_modifica}|piano:{topic_attuali}"
+        if vecchia_blacklist:
+            nuovo_feedback += f"|blacklist:{vecchia_blacklist}"
+
+        messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state["messages"]]
+
+        return Command(
+            update={
+                "human_feedback": f"modifica:{nuovo_feedback}",
+                "piano_editoriale": None,
+                "messages": messaggi_da_cancellare,
+            },
+            goto="planner",
+        )
 
 
 def krag_research_node(state: Blog_Cucina):
@@ -44,23 +352,13 @@ def krag_research_node(state: Blog_Cucina):
     REGOLE DI COMPORTAMENTO (rispettale rigorosamente in ordine):
     1. **Prima azione assoluta verifica che il post non sia gia stato pubblicato**: chiama 'controlla_storico_post' su '{topic}'.
     
-    2. Analizza la risposta del Knowledge Graph:
-       - Se inizia con "BLOCCATO": significa che il post è già stato pubblicato di recente.
-       
-         → Chiama 'krag_suggerisci_varianti'  se parliamo di ricette per ottenere gli ingredienti base e 3 varianti creative.
-         → Dopo aver ricevuto le varianti, chiama IMMEDIATAMENTE 'chiedi_variante' passando le 3 opzioni all'utente.
-         → FERMATI. Non invocare altri tool.
-        
-       
        - Se inizia con "OK": significa che il post è nuovo. Devi raccogliere le informazioni seguendo questo esatto flusso di ragionamento (Thought -> Action):
            
            
             Sai che il nostro database locale contiene solo ricette classiche,  Effetua la ricerca su DB LOCALE usando 'cerca_ricetta_nel_db'. Controlla che nei dati estratti dal db  ci siano dati validi in base al '{topic}' in quel caso non effettuare la ricerca online. Nel caso in cui
             L'utente richieda varianti, modifiche o versioni light/leggere delle ricette devi cercare informazioni sul web utilizzando "esegui_ricerca_web" DEVI estrarre gli INGREDIENTI, le DOSI e il PROCEDIMENTO. Usa la ricerca web nel caso in cui i dati del DB locale siano insufficienti o non pertinenti al topic richiesto.
             
-          
 
-    
     3. Se ricevi "ERRORE" o "KRAG_ERRORE", segnala immediatamente il problema all'utente e chiedi istruzioni.
     """)
 
@@ -74,7 +372,7 @@ def krag_research_node(state: Blog_Cucina):
 
     risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
 
-    return {"messages": [risposta_llm]}
+    return {"messages": [risposta_llm], "nodo_chiamante": "research"}
 
 
 def validator_node(state: Blog_Cucina):

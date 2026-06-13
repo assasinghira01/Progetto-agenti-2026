@@ -1,8 +1,10 @@
+from typing import Literal
+
 from langgraph.graph import StateGraph, START, END
 from graph import state
 from graph.schemas import PianoEditoriale
 from graph.state import Blog_Cucina
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from config import llm
 from graph.nodes import (
     planner_node,
@@ -12,14 +14,15 @@ from graph.nodes import (
     human_review_node,
     kg_update_node,
     aggiorna_topic_node,
+    human_review_planner,
 )
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.prebuilt import ToolNode
 from config import lista_tools  #
 
 # --- 1. IL NODO DEGLI STRUMENTI ---
-# LangGraph crea automaticamente il nodo che esegue le funzioni Python
-nodo_strumenti = ToolNode(lista_tools)
+
+
+tools_by_name = {tool.name: tool for tool in lista_tools}
 
 
 # --- 2. FUNZIONI DI ROUTING ---
@@ -39,27 +42,58 @@ def smista_documenti_node(state: Blog_Cucina):
 
 
 # --- 3. FUNZIONI DI ROUTING CONDIZIONALE (ROUTER) ---
-def router_pianificazione(state: Blog_Cucina):
-    """Decide se il planner ha già generato un piano editoriale o se deve ancora farlo."""
-    last_msg = state["messages"][-1]
-    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-        print(f"  L'Agente richiede i tool: {[t['name'] for t in last_msg.tool_calls]}")
+def router_pianificazione(state: Blog_Cucina) -> Literal["tools", "estrai_piano"]:
+    last_message = state["messages"][-1]
+    input_utente = state["input_utente"]
+
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
         return "tools"
-    print(
-        " L'Agente ha concluso la pianificazione. Passo all'estrazione del piano editoriale."
-    )
-    return "estrai_piano"
+
+    if input_utente == "PIANIFICAZIONE_AUTOMATICA":
+        return "estrai_piano"
+    else:
+        return "research"
 
 
 def estrai_piano_node(state: Blog_Cucina):
-    ultimo_testo = state["messages"][-1].content
+    messaggi = state["messages"]
+
+    print("\n" + "=" * 50)
+    print("🧠 LOG DEI RAGIONAMENTI DELL'AGENTE")
+    print("=" * 50)
+
+    storico_riflessioni = []
+
+    for msg in messaggi:
+        # Cerchiamo solo i messaggi di risposta generati dal think_tool
+        if getattr(msg, "name", "") == "think_tool":
+            # Rimuoviamo il prefisso tecnico per avere solo il testo pulito
+            testo_pulito = msg.content.replace(
+                "Riflessione registrata con successo: ", ""
+            ).strip()
+            storico_riflessioni.append(testo_pulito)
+
+            # Stampiamo numerando i passaggi
+            print(f"[Step {len(storico_riflessioni)}] {testo_pulito}")
+            print("-" * 50)
+
+    testo_ragionamenti = "\n".join(storico_riflessioni)
+
+    prompt_estrazione = f"""
+    Leggi attentamente il seguente log dei ragionamenti di un agente AI.
+    Estrai ESATTAMENTE i 3 topic finali che l'agente ha deciso di approvare.
+    
+    LOG RAGIONAMENTI:
+    {testo_ragionamenti}
+    """
     llm_structured = llm.with_structured_output(PianoEditoriale)
-    piano = llm_structured.invoke(ultimo_testo)
-    print("\n--- PIANO EDITORIALE ESTRATTO ---")
-    for i, post in enumerate(piano.sequenza_post):
-        print(f"[{i+1}] Topic: {post.topic_ricetta} | Tipo: {post.tipo_post}")
-        print(f"    Giustificazione: {post.giustificazione}")
-    return {"piano_editoriale": piano.sequenza_post, "indice_post_corrente": 0}
+    piano = llm_structured.invoke(prompt_estrazione)
+
+    return {
+        "piano_editoriale": piano,
+        "indice_post_corrente": 0,
+        "reasoning_trace": storico_riflessioni,
+    }
 
 
 def router_ricerca(state: Blog_Cucina):
@@ -72,43 +106,81 @@ def router_ricerca(state: Blog_Cucina):
             f"  L'Agente richiede i tool: {[t['name'] for t in ultimo_messaggio.tool_calls]}"
         )
         return "tools"
-
     # Se non ci sono tool_calls, l'agente ha finito di raccogliere dati
-    print(" L'Agente ha concluso la ricerca. Passo al validatore.")
+
     return "validator"
 
 
-def router_dopo_tools(state: Blog_Cucina):
-    """
-    Decide a quale agente restituire i risultati dei tool.
-    """
-    if not state.get("piano_editoriale"):
-        print(" [ROUTING] Risultati del tool inviati al Planner.")
-        return "planner"
-    print(" [ROUTING] Risultati del tool inviati allo smistamento documenti.")
-    return "smista_documenti"
+def tool_node(state: Blog_Cucina):
+    last_message = state["messages"][-1]
+    tool_calls = last_message.tool_calls
+
+    print(f"\n--- [TOOL NODE] Trovate {len(tool_calls)} chiamate a tool ---")
+
+    observations = []
+    for idx, tool_call in enumerate(tool_calls, start=1):
+        tool_name = tool_call["name"]
+        tool_args = tool_call["args"]
+        tool_id = tool_call["id"]
+
+        # STAMPA: tool in esecuzione
+        print(f"\n[{idx}] Esecuzione tool: {tool_name}")
+        print(f"    Argomenti: {tool_args}")
+        print(f"    Tool call ID: {tool_id}")
+
+        tool = tools_by_name.get(tool_name)
+        if tool is None:
+            msg = f"Errore: tool '{tool_name}' non trovato"
+            observations.append(msg)
+        else:
+            # Esegui il tool
+            result = tool.invoke(tool_args)
+            observations.append(result)
+
+    # Costruzione dei messaggi di risposta
+    tool_outputs = [
+        ToolMessage(
+            content=str(obs), name=tool_call["name"], tool_call_id=tool_call["id"]
+        )
+        for obs, tool_call in zip(observations, tool_calls)
+    ]
+
+    return {"messages": tool_outputs}
 
 
-def after_tools(state: Blog_Cucina):
-    """
-    Controlla se tra i tool appena eseguiti c'era 'chiedi_variante'.
-    In quel caso devia su 'aggiorna_topic', altrimenti rimanda ad analizzare i dati.
-    """
-    ultimo_ai_message = None
-    # Andiamo a ritroso nella cronologia per trovare l'ultimo messaggio dell'AI con dei tool
-    for m in reversed(state["messages"]):
-        if isinstance(m, AIMessage) and m.tool_calls:
-            ultimo_ai_message = m
-            break
+def router_dopo_tools(state: Blog_Cucina) -> str:
+    # 1. Recuperiamo chi ha chiamato il tool e i messaggi
+    print("\n--- [ROUTER DOPO TOOLS] ---")
+    nodo_chiamante = state.get("nodo_chiamante")
+    messaggi = state.get("messages", [])
 
-    if ultimo_ai_message:
-        nomi_tool_chiamati = [t["name"] for t in ultimo_ai_message.tool_calls]
-        if "chiedi_variante" in nomi_tool_chiamati:
-            print(" [ROUTING] Rilevato tool 'chiedi_variante'. Vado ad aggiorna_topic.")
-            return "aggiorna_topic"
+    if not messaggi:
+        return nodo_chiamante  # Fallback di sicurezza
 
-    print(" [ROUTING] Tool standard eseguito. Torno all'agente di ricerca.")
-    return "research"
+    ultimo_messaggio = messaggi[-1]
+
+    # 2. LOGICA INTELLIGENTE: L'ultimo tool usato è stato il "think_tool"?
+    if (
+        isinstance(ultimo_messaggio, ToolMessage)
+        and ultimo_messaggio.name == "think_tool"
+    ):
+        # Mettiamo tutto in maiuscolo per evitare errori se l'LLM scrive "Stato: Finito"
+        riflessione = ultimo_messaggio.content.upper()
+
+        # A. L'agente usa la parola d'ordine di fine lavoro
+        if "STATO: FINITO" in riflessione:
+
+            if nodo_chiamante == "research":
+                return "smista_documenti"
+            else:
+                return "estrai_piano"
+
+        # B. L'agente non ha finito (probabilmente ha usato "STATO: CONTINUO" o ha scordato la keyword)
+        else:
+
+            return nodo_chiamante  # Lo forziamo a continuare il loop ReAct
+
+    return nodo_chiamante
 
 
 def check_validation(state: Blog_Cucina):
@@ -153,25 +225,27 @@ builder = StateGraph(Blog_Cucina)
 builder.add_node("planner", planner_node)
 builder.add_node("estrai_piano", estrai_piano_node)
 builder.add_node("research", krag_research_node)
+builder.add_node("human_review_planner", human_review_planner)
 builder.add_node("validator", validator_node)
 builder.add_node("writer", writer_node)
 builder.add_node("human_review", human_review_node)
 builder.add_node("kg_update", kg_update_node)
-builder.add_node("tools", nodo_strumenti)
+builder.add_node("tools", tool_node)
 builder.add_node("smista_documenti", smista_documenti_node)
 builder.add_node("aggiorna_topic", aggiorna_topic_node)
 
+
 # Definizione degli archi standard
 builder.add_edge(START, "planner")
+
 builder.add_conditional_edges(
     "planner",
     router_pianificazione,
-    {"tools": "tools", "estrai_piano": "estrai_piano"},
-)
-builder.add_conditional_edges(
-    "research",
-    router_ricerca,
-    {"tools": "tools", "validator": "validator"},
+    {
+        "tools": "tools",
+        "estrai_piano": "estrai_piano",
+        "research": "research",
+    },
 )
 
 builder.add_conditional_edges(
@@ -179,14 +253,18 @@ builder.add_conditional_edges(
     router_dopo_tools,
     {
         "planner": "planner",
+        "estrai_piano": "estrai_piano",
         "smista_documenti": "smista_documenti",
     },
 )
 
+
+builder.add_edge("estrai_piano", "human_review_planner")
+
 builder.add_conditional_edges(
-    "smista_documenti",
-    after_tools,
-    {"aggiorna_topic": "aggiorna_topic", "research": "research"},
+    "research",
+    router_ricerca,
+    {"tools": "tools", "validator": "validator"},
 )
 
 
@@ -215,3 +293,6 @@ builder.add_conditional_edges(
 builder.add_edge("kg_update", END)
 memoria_temporanea = InMemorySaver()
 app = builder.compile(checkpointer=memoria_temporanea)
+
+with open("diagramma_agente.png", "wb") as f:
+    f.write(app.get_graph().draw_mermaid_png())

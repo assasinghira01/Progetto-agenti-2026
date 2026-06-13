@@ -7,6 +7,8 @@ from graph.schemas import PostPianificato, RecipeDraft
 class Blog_Cucina(MessagesState):
     input_utente: str
     topic_corrente: Optional[str] = None
+    nodo_chiamante: str
+    reasoning_trace: Annotated[list[str], operator.add]
     kg_context: Annotated[List[str], operator.add]
     rag_documents: Annotated[List[str], operator.add]
     web_documents: Annotated[List[str], operator.add]
@@ -18,4 +20,4 @@ class Blog_Cucina(MessagesState):
     human_feedback: Optional[str] = None
     recipe_draft: Optional[RecipeDraft] = None
     piano_editoriale: list[PostPianificato] = []
-    indice_post_corrente: int = 0
+    indice_post_corrente: int

@@ -18,16 +18,29 @@ def main():
     # Inizializziamo o carichiamo il database vettoriale locale
     inizializza_vector_db()
 
-    print(
-        "\nPremi INVIO per far generare al Copilot il piano editoriale in automatico,"
-    )
-    richiesta = input(
-        "oppure scrivi una direttiva (es. 'Voglio fare un post sui dolci'):\n> "
-    )
+    while True:
+        print("\n=== MENU PRINCIPALE ===")
+        print("1. Pianificazione automatica (piano editoriale)")
+        print("2. Scrivi un post specifico")
+        print("3. Esci")
 
-    # Se l'utente preme solo invio, diamo un comando standard per innescare il Planner
-    if not richiesta.strip():
-        richiesta = "Analizza il Knowledge Graph e proponi il prossimo post editoriale."
+        scelta = input("Scegli un'opzione (1-3): ").strip()
+
+        if scelta == "1":
+            richiesta = "PIANIFICAZIONE_AUTOMATICA"
+            break
+        elif scelta == "2":
+            richiesta = input("Scrivi un post (es. 'tiramisù'):\n> ").strip()
+            if not richiesta:
+                print("Topic non valido, riprova.")
+                continue
+            break
+        elif scelta == "3":
+            print("Uscita dal programma.")
+            return
+        else:
+            print("Scelta non valida, riprova.")
+            continue
 
     # Creiamo un ID di sessione univoco (Thread) per mantenere attiva la memoria
     thread_id = str(uuid.uuid4())
@@ -35,87 +48,85 @@ def main():
 
     print("\nAvvio del flusso di lavoro dell'Agente...\n")
 
-    # --- PRIMO AVVIO DEL GRAFO ---
+    # --- AVVIO DEL GRAFO ---
     for event in app.stream({"input_utente": richiesta}, config):
         for nome_nodo, var_modificate in event.items():
             if nome_nodo != "__root__":
                 print(f"[LOG GRAFO] Il nodo '{nome_nodo}' ha terminato l'esecuzione.")
 
     # --- LOOP DINAMICO DI GESTIONE INTERRUPT ---
+
     while True:
         stato_grafo = app.get_state(config)
 
-        # Se non ci sono nodi successivi nella coda (.next), il grafo ha concluso la sua esecuzione
+        # Se non ci sono nodi successivi (.next), il grafo ha terminato
         if not stato_grafo.next:
             break
 
         print("\n[SISTEMA IN PAUSA] Rilevato punto di interruzione Human-in-the-Loop.")
 
-        # Estraggiamo i dati correnti memorizzati nello stato del thread
-        valori_stato = stato_grafo.values
-        piano_editoriale = valori_stato.get("piano_strutturato")
-        bozza_articolo = valori_stato.get("post_draft")
-        # messaggi = valori_stato.get("messages", [])
+        prossimo_nodo = stato_grafo.next[0]  # Il primo nodo in attesa
+        comando = None
 
-        if piano_editoriale and not bozza_articolo:
-            print("\n----------------------------------------------------")
-            print("IL COPILOT HA GENERATO LA STRATEGIA EDITORIALE:")
-            print("----------------------------------------------------")
+        if prossimo_nodo == "human_review_planner":
+            piano = stato_grafo.values.get("piano_editoriale")
+            if not piano:
+                print("Errore: nessun piano trovato.")
+                break
 
-            # Formattiamo la stampa del piano Pydantic/JSON
-            for i, post in enumerate(piano_editoriale):
-                print(
-                    f"[{i+1}] Topic: {post['topic_ricetta']} | Tipo: {post['tipo_post']}"
-                )
-                print(f"    Motivo: {post['giustificazione']}")
+            print("\n--- PIANO EDITORIALE ---")
+            piano = stato_grafo.values.get("piano_editoriale")
+            for i, post in enumerate(piano.sequenza_post):
+                print(f"[{i+1}] Ricetta: {post.topic} \n categoria:({post.categoria})")
+                print(f"giustificazione: {post.giustificazione}\n")
 
-            feedback_utente = input(
-                "\nApprovi questo piano? (Digita 'Approvo', oppure indica le modifiche):\n> "
-            )
-            comando_sblocco = Command(
-                resume=feedback_utente, update={"human_feedback": feedback_utente}
-            )
+            scelta = input(
+                "\n 1) APPROVA PIANO" "\n2) RIGENERA PIANO:\n" "3) MODIFICA PIANO:\n"
+            ).strip()
 
-            """ # SCENARIO B: Il Planner è approvato, ma l'agente chiede quale "Variante" della ricetta usare
-            elif not bozza_articolo and not piano_editoriale: 
-            
-                ultimo_messaggio_agente = messaggi[-1].content if messaggi else "Nessuna opzione."
-                print("\n----------------------------------------------------")
-                print("L'AGENTE CHIEDE DI SCEGLIERE UNA VARIANTE STORICA:")
-                print("----------------------------------------------------")
-                print(ultimo_messaggio_agente)
+            # Usiamo il Command per decidere il nodo successivo
+            if scelta == "1":
+                comando = Command(resume="APPROVA")
 
-                feedback_utente = input(
-                    "\nQuale variante decidi di sviluppare? (Digita la tua scelta):\n> "
-                )
-                comando_sblocco = Command(
-                    resume=feedback_utente, update={"human_feedback": feedback_utente}
-                )
-"""
-        # SCENARIO C: La bozza del testo è pronta, revisione finale prima della pubblicazione
-        elif bozza_articolo:
-            print("\n----------------------------------------------------")
-            print("BOZZA FINALE GENERATA DALL'LLM PER IL TUO BLOG:")
-            print("----------------------------------------------------")
-            print(bozza_articolo)
-            print("----------------------------------------------------")
+            elif scelta == "2":
+                comando = Command(resume="RIGENERA")
 
-            feedback_utente = input(
-                "\nInserisci il tuo verdetto (es. 'Approvo', oppure indica le modifiche al testo):\n> "
-            )
-            comando_sblocco = Command(
-                resume=feedback_utente, update={"human_feedback": feedback_utente}
-            )
+            elif scelta == "3":
+                comando = Command(resume="MODIFICA")
 
-        print("\nRipresa dell'esecuzione con l'input fornito...\n")
+            else:
+                print("si è verificato un errore")
+                continue
+
+        elif prossimo_nodo == "human_review":
+            bozza = stato_grafo.values.get("post_draft")
+            if not bozza:
+                print("Errore: nessuna bozza trovata.")
+                break
+
+            print("\n--- BOZZA POST ---\n", bozza, "\n----------------")
+            scelta = input("1=APPROVA  2=MODIFICA  3=RIGENERA: ").strip()
+
+            if scelta == "1":
+                comando = Command(resume="APPROVATO")
+            elif scelta == "2":
+                modifica = input("Modifiche: ")
+                comando = Command(resume=modifica)
+            else:
+                comando = Command(resume="RIGENERA")
+        else:
+            print(f"Nodo {prossimo_nodo} non gestito, esco.")
+            break
 
         # Riattiviamo lo stream passando il comando configurato
-        for event in app.stream(comando_sblocco, config):
-            for nome_nodo, var_modificate in event.items():
-                if nome_nodo != "__root__":
-                    print(
-                        f"[LOG GRAFO] Ripresa attività. Completato nodo: '{nome_nodo}'"
-                    )
+        print("\nRipresa dell'esecuzione con l'input fornito...\n")
+        if comando:
+            for event in app.stream(comando, config):
+                for nome_nodo, var_modificate in event.items():
+                    if nome_nodo != "__root__":
+                        print(
+                            f"[LOG GRAFO] Ripresa attività. Completato nodo: '{nome_nodo}'"
+                        )
 
     # --- CONCLUSIONE DEL FLUSSO ---
     stato_finale = app.get_state(config)
