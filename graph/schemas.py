@@ -59,10 +59,9 @@ class ValidationResult(BaseModel):
     )
 
 
-# Schema di output
-class TopicExtraction(BaseModel):
+class TopicEstratto(BaseModel):
     topic: str = Field(
-        description="Il nome del piatto o ingrediente principale richiesto."
+        description="Il nome dell'UNICA ricetta o variante finale approvata dall'agente."
     )
 
 

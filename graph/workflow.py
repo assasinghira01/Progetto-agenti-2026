@@ -2,11 +2,12 @@ from typing import Literal
 
 from langgraph.graph import StateGraph, START, END
 from graph import state
-from graph.schemas import PianoEditoriale
+from graph.schemas import PianoEditoriale, TopicEstratto
 from graph.state import Blog_Cucina
 from langchain_core.messages import AIMessage, ToolMessage
 from config import llm
 from graph.nodes import (
+    human_review_variante,
     planner_node,
     krag_research_node,
     writer_node,
@@ -52,15 +53,11 @@ def router_pianificazione(state: Blog_Cucina) -> Literal["tools", "estrai_piano"
     if input_utente == "PIANIFICAZIONE_AUTOMATICA":
         return "estrai_piano"
     else:
-        return "research"
+        return "estrai_singolo_topic"
 
 
 def estrai_piano_node(state: Blog_Cucina):
     messaggi = state["messages"]
-
-    print("\n" + "=" * 50)
-    print("🧠 LOG DEI RAGIONAMENTI DELL'AGENTE")
-    print("=" * 50)
 
     storico_riflessioni = []
 
@@ -72,10 +69,6 @@ def estrai_piano_node(state: Blog_Cucina):
                 "Riflessione registrata con successo: ", ""
             ).strip()
             storico_riflessioni.append(testo_pulito)
-
-            # Stampiamo numerando i passaggi
-            print(f"[Step {len(storico_riflessioni)}] {testo_pulito}")
-            print("-" * 50)
 
     testo_ragionamenti = "\n".join(storico_riflessioni)
 
@@ -92,6 +85,47 @@ def estrai_piano_node(state: Blog_Cucina):
     return {
         "piano_editoriale": piano,
         "indice_post_corrente": 0,
+        "reasoning_trace": storico_riflessioni,
+    }
+
+
+def estrai_singolo_topic_node(state: Blog_Cucina):
+    messaggi = state.get("messages", [])
+
+    print("\n--- [NODO: ESTRAZIONE TOPIC FINALE VARIANTE] ---")
+
+    storico_riflessioni = []
+
+    # Raccogliamo in silenzio tutti i log del think_tool
+    for msg in messaggi:
+        if getattr(msg, "name", "") == "think_tool":
+            testo_pulito = msg.content.replace(
+                "Riflessione registrata con successo: ", ""
+            ).strip()
+            storico_riflessioni.append(testo_pulito)
+
+    testo_ragionamenti = "\n".join(storico_riflessioni)
+
+    prompt_estrazione = f"""
+    Leggi attentamente il seguente log dei ragionamenti di un agente AI.
+    L'agente stava cercando un singolo topic. Potrebbe aver scartato l'idea iniziale e proposto una variante.
+    Estrai ESATTAMENTE il nome dell'UNICA ricetta finale (o variante) che l'agente ha deciso di approvare alla fine (quando dichiara STATO: FINITO).
+    
+    LOG RAGIONAMENTI:
+    {testo_ragionamenti}
+    """
+
+    # Invochiamo l'LLM per estrarre il dato pulito
+    llm_estrazione_singola = llm.with_structured_output(TopicEstratto)
+    risultato = llm_estrazione_singola.invoke(prompt_estrazione)
+
+    topic_finale = risultato.topic.strip().capitalize()
+
+    print(f" -> [Estrazione] Variante estratta e salvata nello stato: {topic_finale}")
+
+    # Sovrascriviamo il vecchio topic nello stato di LangGraph restituendo una stringa pura
+    return {
+        "topic_corrente": topic_finale,
         "reasoning_trace": storico_riflessioni,
     }
 
@@ -114,19 +148,17 @@ def router_ricerca(state: Blog_Cucina):
 def tool_node(state: Blog_Cucina):
     last_message = state["messages"][-1]
     tool_calls = last_message.tool_calls
-
     print(f"\n--- [TOOL NODE] Trovate {len(tool_calls)} chiamate a tool ---")
-
     observations = []
     for idx, tool_call in enumerate(tool_calls, start=1):
         tool_name = tool_call["name"]
         tool_args = tool_call["args"]
         tool_id = tool_call["id"]
 
-        # STAMPA: tool in esecuzione
-        print(f"\n[{idx}] Esecuzione tool: {tool_name}")
-        print(f"    Argomenti: {tool_args}")
-        print(f"    Tool call ID: {tool_id}")
+        # STAMPA BASE per i tool normali (opzionale, la teniamo per debug)
+        if tool_name != "think_tool":
+            print(f"\n[{idx}] Esecuzione tool: {tool_name}")
+            print(f"    Argomenti: {tool_args}")
 
         tool = tools_by_name.get(tool_name)
         if tool is None:
@@ -136,6 +168,18 @@ def tool_node(state: Blog_Cucina):
             # Esegui il tool
             result = tool.invoke(tool_args)
             observations.append(result)
+
+            # --- LA NOSTRA STAMPA UNIVERSALE DEI RAGIONAMENTI ---
+            if tool_name == "think_tool":
+                # Puliamo il prefisso tecnico per l'utente finale
+                testo_pulito = result.replace(
+                    "Riflessione registrata con successo: ", ""
+                ).strip()
+                print("\n" + "=" * 60)
+                print(" 🧠 RAGIONAMENTO AGENTE IN CORSO...")
+                print("-" * 60)
+                print(f" {testo_pulito}")
+                print("=" * 60 + "\n")
 
     # Costruzione dei messaggi di risposta
     tool_outputs = [
@@ -153,7 +197,7 @@ def router_dopo_tools(state: Blog_Cucina) -> str:
     print("\n--- [ROUTER DOPO TOOLS] ---")
     nodo_chiamante = state.get("nodo_chiamante")
     messaggi = state.get("messages", [])
-
+    input_utente = state.get("input_utente", "")
     if not messaggi:
         return nodo_chiamante  # Fallback di sicurezza
 
@@ -168,18 +212,19 @@ def router_dopo_tools(state: Blog_Cucina) -> str:
         riflessione = ultimo_messaggio.content.upper()
 
         # A. L'agente usa la parola d'ordine di fine lavoro
+        # A. L'agente usa la parola d'ordine di fine lavoro
         if "STATO: FINITO" in riflessione:
 
             if nodo_chiamante == "research":
                 return "smista_documenti"
-            else:
-                return "estrai_piano"
-
-        # B. L'agente non ha finito (probabilmente ha usato "STATO: CONTINUO" o ha scordato la keyword)
+            elif nodo_chiamante == "planner":
+                if input_utente == "PIANIFICAZIONE_AUTOMATICA":
+                    return "estrai_piano"
+                else:
+                    return "estrai_singolo_topic"
+        # B. L'agente non ha finito (ha usato "STATO: CONTINUO" o deve ancora validare)
         else:
-
-            return nodo_chiamante  # Lo forziamo a continuare il loop ReAct
-
+            return nodo_chiamante
     return nodo_chiamante
 
 
@@ -226,9 +271,11 @@ builder.add_node("planner", planner_node)
 builder.add_node("estrai_piano", estrai_piano_node)
 builder.add_node("research", krag_research_node)
 builder.add_node("human_review_planner", human_review_planner)
+builder.add_node("human_review_variante", human_review_variante)
 builder.add_node("validator", validator_node)
 builder.add_node("writer", writer_node)
 builder.add_node("human_review", human_review_node)
+builder.add_node("estrai_singolo_topic", estrai_singolo_topic_node)
 builder.add_node("kg_update", kg_update_node)
 builder.add_node("tools", tool_node)
 builder.add_node("smista_documenti", smista_documenti_node)
@@ -244,7 +291,8 @@ builder.add_conditional_edges(
     {
         "tools": "tools",
         "estrai_piano": "estrai_piano",
-        "research": "research",
+        "human_review_variante": "human_review_variante",
+        "estrai_singolo_topic": "estrai_singolo_topic",
     },
 )
 
@@ -253,12 +301,15 @@ builder.add_conditional_edges(
     router_dopo_tools,
     {
         "planner": "planner",
+        "research": "research",
         "estrai_piano": "estrai_piano",
         "smista_documenti": "smista_documenti",
+        "human_review_variante": "human_review_variante",
+        "estrai_singolo_topic": "estrai_singolo_topic",
     },
 )
 
-
+builder.add_edge("estrai_singolo_topic", "human_review_variante")
 builder.add_edge("estrai_piano", "human_review_planner")
 
 builder.add_conditional_edges(
@@ -268,8 +319,7 @@ builder.add_conditional_edges(
 )
 
 
-builder.add_edge("aggiorna_topic", "research")
-
+builder.add_edge("smista_documenti", "research")
 
 # Definizione dell'arco condizionale dal validatore
 builder.add_conditional_edges(

@@ -92,12 +92,39 @@ def main():
                 comando = Command(resume="RIGENERA")
 
             elif scelta == "3":
-                comando = Command(resume="MODIFICA")
-
+                istruzioni = input(
+                    "\n📝 Scrivi le tue istruzioni di modifica (es. 'Sostituisci il dolce con un antipasto'):\n> "
+                ).strip()
+                comando = Command(resume=f"MODIFICA:{istruzioni}")
             else:
                 print("si è verificato un errore")
                 continue
 
+        # --------------------------------------HUMAN REVIEW VARIANTE--------------------------------------
+        elif prossimo_nodo == "human_review_variante":
+            topic_proposto = stato_grafo.values.get("topic_corrente", "Sconosciuto")
+
+            print(
+                "\n Attenzione: Il topic originale è già stato trattato in passato.\n"
+                f" Il sistema propone la variante: '{topic_proposto}' "
+                "basata sugli ingredienti principali del piatto bloccato.\n"
+                "È possibile scegliere una delle seguenti opzioni."
+            )
+            print("\n--- OPZIONI ---")
+            scelta = input("\n 1=APPROVA" " \n 2= RIGENERA" " \n 3= MODIFICA\n").strip()
+            if scelta == "1":
+                comando = Command(resume="APPROVA")
+            elif scelta == "2":
+                comando = Command(resume="RIGENERA")
+            elif scelta == "3":
+                istruzioni = input(
+                    "\n📝 Scrivi le tue istruzioni di modifica:\n> "
+                ).strip()
+                comando = Command(resume=f"MODIFICA:{istruzioni}")
+            else:
+                print("si è verificato un errore")
+                continue
+        # --------------------------------------BOZZA POST--------------------------------------
         elif prossimo_nodo == "human_review":
             bozza = stato_grafo.values.get("post_draft")
             if not bozza:
@@ -118,7 +145,6 @@ def main():
             print(f"Nodo {prossimo_nodo} non gestito, esco.")
             break
 
-        # Riattiviamo lo stream passando il comando configurato
         print("\nRipresa dell'esecuzione con l'input fornito...\n")
         if comando:
             for event in app.stream(comando, config):

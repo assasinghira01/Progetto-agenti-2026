@@ -46,19 +46,18 @@ def controlla_storico_post(topic: str) -> str:
 
 
 @tool
-def krag_suggerisci_varianti(topic: str) -> str:
+def get_ingredienti_per_variante(nome_ricetta: str) -> str:
     """
-    Usa il Knowledge Graph per ottenere gli ingredienti base e suggerire varianti creative.
-    Da chiamare solo dopo che controlla_storico_post ha restituito BLOCCATO.
+    Tool FONDAMENTALE da usare SOLO quando controlla_storico_post ti dice che un topic è BLOCCATO.
+    Interroga il Knowledge Graph per estrarre gli ingredienti principali del piatto bloccato.
+    Analizzando questi ingredienti nel tuo think_tool, potrai decidere in autonomia se
+    creare una 'Variante' o una 'Ricetta Simile'.
     """
-    ingredienti_base = kg_client.espandi_query_per_krag(topic)
-    if not ingredienti_base:
-        return "KRAG_ERRORE|Nessun ingrediente trovato nel grafo per generare varianti."
+    ingredienti = kg_client.espandi_query_per_krag(nome_ricetta)
 
-    # Costruisci un messaggio ricco per l'agente
-    varianti = f"INGREDIENTI_BASE: {', '.join(ingredienti_base)}\n"
-    varianti += "SUGGERISCI_QUESTE_3_VARIANTI:\n"
-    varianti += "1. Variante light (riduci grassi, aggiungi erbe aromatiche)\n"
-    varianti += "2. Variante ricca (aggiungi formaggi o salumi tipici)\n"
-    varianti += "3. Variante di stagione (usa ingredienti diversi in base al periodo)\n"
-    return varianti
+    if not ingredienti:
+        return f"Nessun dettaglio/ingrediente trovato nel grafo per '{nome_ricetta}'. Sii creativo."
+
+    # Restituisce una stringa chiara per l'LLM
+    elenco = ", ".join(ingredienti)
+    return f"DATI ESTRATTI PER '{nome_ricetta}': Gli ingredienti principali sono [{elenco}]."

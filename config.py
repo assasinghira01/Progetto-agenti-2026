@@ -6,9 +6,8 @@ from tools.rag_tool import cerca_ricetta_nel_db
 from tools.kg_tool import (
     controlla_storico_post,
     get_ultimi_post,
-    krag_suggerisci_varianti,
+    get_ingredienti_per_variante,
 )
-from tools.variant_tool import chiedi_variante
 
 load_dotenv()
 
@@ -24,8 +23,7 @@ lista_tools = [
     esegui_ricerca_web,
     cerca_ricetta_nel_db,
     controlla_storico_post,
-    krag_suggerisci_varianti,
-    chiedi_variante,
+    get_ingredienti_per_variante,
     think_tool,
 ]
 
