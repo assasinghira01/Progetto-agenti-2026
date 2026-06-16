@@ -1,22 +1,25 @@
 from pydantic import BaseModel, Field
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 
-class PostPianificato(BaseModel):
+class TopicPianificato(BaseModel):
     topic: str = Field(
-        description="Il nome specifico dell'argomento (es. 'Cassata Siciliana', 'pasta allo scoglio', 'pollo al limone')"
+        description="Il nome specifico dell'argomento (es. 'Cassata Siciliana', 'Pasta allo scoglio')"
     )
+
     categoria: Literal[
         "Antipasto", "Primo", "Secondo", "Contorno", "Dolce", "Salse e Condimenti"
-    ] = Field(description="La categoria del post scelta.")
-    giustificazione: str = Field(
-        description="Il motivo logico per cui hai scelto questo topic, spiegando il ragionamento che ti ha portato a proporre questa ricetta sia in base alle direttive che l'utente ti ha dato, ma anche in abse hai dato che hai trovato nel knolegment graph."
+    ] = Field(description="La categoria gastronomica del piatto.")
+
+    giustificazione: Optional[str] = Field(
+        default="",
+        description="Se è una variante o fa parte di un piano editoriale, spiega il motivo della scelta. Se è un topic singolo imposto dall'utente, lascia vuoto.",
     )
 
 
 class PianoEditoriale(BaseModel):
-    sequenza_post: List[PostPianificato] = Field(
-        description="La lista ordinata di post pianificati."
+    sequenza_post: List[TopicPianificato] = Field(
+        description="La lista ordinata di topic pianificati."
     )
 
 
@@ -56,12 +59,6 @@ class ValidationResult(BaseModel):
             "Motiva brevemente la scelta della fonte web approvata "
             "e l'eventuale esclusione delle altre."
         )
-    )
-
-
-class TopicEstratto(BaseModel):
-    topic: str = Field(
-        description="Il nome dell'UNICA ricetta o variante finale approvata dall'agente."
     )
 
 

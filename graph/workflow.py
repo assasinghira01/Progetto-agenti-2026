@@ -1,10 +1,9 @@
 from typing import Literal
 
 from langgraph.graph import StateGraph, START, END
-from graph import state
-from graph.schemas import PianoEditoriale, TopicEstratto
+from graph.schemas import PianoEditoriale, TopicPianificato
 from graph.state import Blog_Cucina
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, RemoveMessage, ToolMessage
 from config import llm
 from graph.nodes import (
     human_review_variante,
@@ -14,7 +13,6 @@ from graph.nodes import (
     validator_node,
     human_review_node,
     kg_update_node,
-    aggiorna_topic_node,
     human_review_planner,
 )
 from langgraph.checkpoint.memory import InMemorySaver
@@ -29,17 +27,30 @@ tools_by_name = {tool.name: tool for tool in lista_tools}
 # --- 2. FUNZIONI DI ROUTING ---
 def smista_documenti_node(state: Blog_Cucina):
     print("\n--- [NODO INTERMEDIO: SMISTAMENTO DOCUMENTI] ---")
-    ultimo_messaggio = state["messages"][-1]
-    # Controlliamo quale tool ha appena risposto per salvare il testo nel cassetto corretto
-    if hasattr(ultimo_messaggio, "name"):
-        if ultimo_messaggio.name == "cerca_ricetta_nel_db":
-            print(" -> [STATO] Salvo i dati in: rag_documents")
-            return {"rag_documents": [ultimo_messaggio.content]}
-        elif ultimo_messaggio.name == "esegui_ricerca_web":
-            print(" -> [STATO] Salvo i dati in: web_documents")
-            return {"web_documents": [ultimo_messaggio.content]}
+    messaggi = state.get("messages", [])
 
-    return {}
+    rag_docs = []
+    web_docs = []
+
+    for msg in reversed(messaggi):
+
+        if msg.type in ["human", "ai"] and (rag_docs or web_docs):
+            break
+
+        if isinstance(msg, ToolMessage):
+            if msg.name == "cerca_ricetta_nel_db":
+                rag_docs.append(msg.content)
+            elif msg.name == "esegui_ricerca_web":
+                web_docs.append(msg.content)
+
+    rag_docs.reverse()
+    web_docs.reverse()
+
+    print(
+        f" -> [STATO] Estratti {len(rag_docs)} documenti RAG e {len(web_docs)} documenti WEB."
+    )
+
+    return {"rag_documents": rag_docs, "web_documents": web_docs}
 
 
 # --- 3. FUNZIONI DI ROUTING CONDIZIONALE (ROUTER) ---
@@ -57,14 +68,19 @@ def router_pianificazione(state: Blog_Cucina) -> Literal["tools", "estrai_piano"
 
 
 def estrai_piano_node(state: Blog_Cucina):
-    messaggi = state["messages"]
+    print("\n--- [NODO: ESTRAZIONE PIANO FINALE] ---")
+    messaggi = state.get("messages", [])
+    feedback = state.get("human_feedback", "")
+
+    parti = feedback.split("|")
+    piano_salvato = parti[1].replace("piano:", "").strip() if len(parti) > 1 else ""
 
     storico_riflessioni = []
 
     for msg in messaggi:
-        # Cerchiamo solo i messaggi di risposta generati dal think_tool
+
         if getattr(msg, "name", "") == "think_tool":
-            # Rimuoviamo il prefisso tecnico per avere solo il testo pulito
+
             testo_pulito = msg.content.replace(
                 "Riflessione registrata con successo: ", ""
             ).strip()
@@ -72,13 +88,33 @@ def estrai_piano_node(state: Blog_Cucina):
 
     testo_ragionamenti = "\n".join(storico_riflessioni)
 
+    contesto_modifica = ""
+    if feedback and "modifica:" in feedback:
+        contesto_modifica = f"""
+        ATTENZIONE: Questo piano è il risultato di una MODIFICA. 
+        L'agente ha deliberatamente mantenuto intatti un topic del piano precedente e ne ha appena trovato uno nuovo.
+    piano_salvato = (
+        Devi scansionare il testo per trovare la lista unificata (i topic mantenuti + il nuovo topic). i topic da considerare sono: {piano_salvato}.
+        """
+
     prompt_estrazione = f"""
     Leggi attentamente il seguente log dei ragionamenti di un agente AI.
-    Estrai ESATTAMENTE i 3 topic finali che l'agente ha deciso di approvare.
+    Il tuo compito è estrarre il PIANO EDITORIALE FINALE completo e aggiornato.
+    {contesto_modifica}
+    
+    🚨 REGOLA MATEMATICA ASSOLUTA: 
+    Il piano estratto DEVE contenere SEMPRE E RIGOROSAMENTE 3 RICETTE. Non 1, non 2, ma ESATTAMENTE 3.
+    Cerca l'ultima riflessione dell'agente in cui elenca il totale definitivo dei piatti approvati.
+    
+    Estrai per ognuno dei 3 topic finali:
+    - Il nome della ricetta
+    - La categoria (Antipasto, Primo, Secondo, o Dolce)
+    - Una  giustificazione sul perché fa parte del piano.
     
     LOG RAGIONAMENTI:
     {testo_ragionamenti}
     """
+
     llm_structured = llm.with_structured_output(PianoEditoriale)
     piano = llm_structured.invoke(prompt_estrazione)
 
@@ -90,44 +126,118 @@ def estrai_piano_node(state: Blog_Cucina):
 
 
 def estrai_singolo_topic_node(state: Blog_Cucina):
-    messaggi = state.get("messages", [])
+    print("\n--- [NODO: ESTRAZIONE TOPIC / GESTIONE FEEDBACK] ---")
 
-    print("\n--- [NODO: ESTRAZIONE TOPIC FINALE VARIANTE] ---")
+    messaggi = state.get("messages", [])
+    feedback = state.get("human_feedback", "")
+
+    # =================================================================
+    # CASO 1: Override Umano
+    # =================================================================
+    if feedback:
+        print(f" -> Rilevato feedback umano: '{feedback}'")
+        prompt_feedback = f"""
+        L'utente ha richiesto una modifica manuale: "{feedback}".
+        Estrai il nome del nuovo piatto, assegnali la categoria corretta e lascia la giustificazione vuota.
+        """
+
+        llm_estrazione = llm.with_structured_output(TopicPianificato)
+        risultato = llm_estrazione.invoke(prompt_feedback)
+
+        print(
+            f" -> [Override Umano] Topic: {risultato.topic} | Categoria: {risultato.categoria}"
+        )
+
+        return {
+            "topic_corrente": risultato.topic,
+            "human_feedback": "",
+        }
 
     storico_riflessioni = []
-
-    # Raccogliamo in silenzio tutti i log del think_tool
     for msg in messaggi:
         if getattr(msg, "name", "") == "think_tool":
-            testo_pulito = msg.content.replace(
-                "Riflessione registrata con successo: ", ""
-            ).strip()
-            storico_riflessioni.append(testo_pulito)
+            storico_riflessioni.append(
+                msg.content.replace("Riflessione registrata con successo: ", "").strip()
+            )
 
     testo_ragionamenti = "\n".join(storico_riflessioni)
+    is_variante = (
+        "variante" in testo_ragionamenti.lower()
+        or "bloccato" in testo_ragionamenti.lower()
+    )
 
-    prompt_estrazione = f"""
-    Leggi attentamente il seguente log dei ragionamenti di un agente AI.
-    L'agente stava cercando un singolo topic. Potrebbe aver scartato l'idea iniziale e proposto una variante.
-    Estrai ESATTAMENTE il nome dell'UNICA ricetta finale (o variante) che l'agente ha deciso di approvare alla fine (quando dichiara STATO: FINITO).
-    
-    LOG RAGIONAMENTI:
-    {testo_ragionamenti}
-    """
+    if is_variante:
+        print(" -> Rilevato duplicato storico. Estrazione della VARIANTE...")
+        prompt_estrazione = f"""
+        L'agente ha proposto una VARIANTE a causa di un duplicato.
+        Leggi i log ed estrai:
+        1. Il topic (la variante approvata).
+        2. La categoria gastronomica.
+        3. La giustificazione (spiega brevemente perché ha scelto questa variante).
+        LOG: {testo_ragionamenti}
+        
+        """
 
-    # Invochiamo l'LLM per estrarre il dato pulito
-    llm_estrazione_singola = llm.with_structured_output(TopicEstratto)
-    risultato = llm_estrazione_singola.invoke(prompt_estrazione)
+        llm_estrazione_singola = llm.with_structured_output(TopicPianificato)
+        risultato = llm_estrazione_singola.invoke(prompt_estrazione)
 
-    topic_finale = risultato.topic.strip().capitalize()
+        print(
+            f" -> [Estrazione] Topic: {risultato.topic} | Categoria: {risultato.categoria} | motivazione : {risultato.giustificazione}"
+        )
 
-    print(f" -> [Estrazione] Variante estratta e salvata nello stato: {topic_finale}")
+        return {
+            "topic_corrente": risultato.topic,
+            "reasoning_trace": storico_riflessioni,
+        }
 
-    # Sovrascriviamo il vecchio topic nello stato di LangGraph restituendo una stringa pura
-    return {
-        "topic_corrente": topic_finale,
-        "reasoning_trace": storico_riflessioni,
-    }
+    else:
+        print(" -> Topic originale approvato. Estrazione in corso...")
+        prompt_estrazione = f"""
+        L'agente ha approvato il topic originale.
+        Leggi i log ed estrai:
+        1. Il topic confermato.
+        2. La categoria gastronomica.
+        3. Lascia la giustificazione vuota.
+        LOG: {testo_ragionamenti}
+        """
+
+        llm_estrazione_singola = llm.with_structured_output(TopicPianificato)
+        risultato = llm_estrazione_singola.invoke(prompt_estrazione)
+        messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state["messages"]]
+
+        print(
+            f" -> [Estrazione] Topic: {risultato.topic} | Categoria: {risultato.categoria}"
+        )
+
+        return {
+            "messages": messaggi_da_cancellare,
+            "topic_corrente": risultato.topic,
+            "reasoning_trace": storico_riflessioni,
+        }
+
+
+def router_dopo_estrazione(
+    state: Blog_Cucina,
+) -> Literal["human_review_variante", "research"]:
+    print("\n--- [ROUTER: CONTROLLO DUPLICATI / HITL] ---")
+
+    messaggi = state.get("messages", [])
+
+    testo_planner = ""
+    for msg in reversed(messaggi):
+        if isinstance(msg, AIMessage) and msg.content:
+            testo_planner = msg.content.lower()
+            break
+
+    # Se il planner ha usato queste parole, significa che ha trovato un duplicato nel DB
+    if "variante" in testo_planner or "bloccato" in testo_planner:
+        print(
+            " -> Rilevato DUPLICATO (Variante proposta). Invio a HUMAN_REVIEW_VARIANTE."
+        )
+        return "human_review_variante"
+    else:
+        print(" -> Topic ORIGINALE e approvato. Vado diretto in RESEARCH.")
+        return "research"
 
 
 def router_ricerca(state: Blog_Cucina):
@@ -212,17 +322,18 @@ def router_dopo_tools(state: Blog_Cucina) -> str:
         riflessione = ultimo_messaggio.content.upper()
 
         # A. L'agente usa la parola d'ordine di fine lavoro
-        # A. L'agente usa la parola d'ordine di fine lavoro
         if "STATO: FINITO" in riflessione:
 
             if nodo_chiamante == "research":
                 return "smista_documenti"
+
             elif nodo_chiamante == "planner":
                 if input_utente == "PIANIFICAZIONE_AUTOMATICA":
                     return "estrai_piano"
                 else:
+
                     return "estrai_singolo_topic"
-        # B. L'agente non ha finito (ha usato "STATO: CONTINUO" o deve ancora validare)
+
         else:
             return nodo_chiamante
     return nodo_chiamante
@@ -238,18 +349,6 @@ def check_validation(state: Blog_Cucina):
             "ROUTING: Rilevata assurdità o mancanza totale di dati. Blocco il processo!"
         )
         return "end_block"
-
-
-def check_human_approval(state: Blog_Cucina):
-    """Legge la decisione umana presa durante l'interruzione."""
-    feedback = state.get("human_feedback", "").lower()
-
-    if "approvo" in feedback or "ok" in feedback or "perfetto" in feedback:
-        print(" Semaforo VERDE umano: Procedo al salvataggio su Neo4j.")
-        return "kg_update"
-    else:
-        print(" Semaforo ARANCIONE umano: L'utente vuole modifiche. Riscrivo il post!")
-        return "writer"
 
 
 def altri_post_da_fare(state):
@@ -279,7 +378,6 @@ builder.add_node("estrai_singolo_topic", estrai_singolo_topic_node)
 builder.add_node("kg_update", kg_update_node)
 builder.add_node("tools", tool_node)
 builder.add_node("smista_documenti", smista_documenti_node)
-builder.add_node("aggiorna_topic", aggiorna_topic_node)
 
 
 # Definizione degli archi standard
@@ -291,7 +389,6 @@ builder.add_conditional_edges(
     {
         "tools": "tools",
         "estrai_piano": "estrai_piano",
-        "human_review_variante": "human_review_variante",
         "estrai_singolo_topic": "estrai_singolo_topic",
     },
 )
@@ -304,13 +401,19 @@ builder.add_conditional_edges(
         "research": "research",
         "estrai_piano": "estrai_piano",
         "smista_documenti": "smista_documenti",
-        "human_review_variante": "human_review_variante",
         "estrai_singolo_topic": "estrai_singolo_topic",
     },
 )
 
-builder.add_edge("estrai_singolo_topic", "human_review_variante")
+builder.add_conditional_edges(
+    "estrai_singolo_topic",
+    router_dopo_estrazione,
+    {"human_review_variante": "human_review_variante", "research": "research"},
+)
+
+
 builder.add_edge("estrai_piano", "human_review_planner")
+
 
 builder.add_conditional_edges(
     "research",
@@ -319,8 +422,7 @@ builder.add_conditional_edges(
 )
 
 
-builder.add_edge("smista_documenti", "research")
-
+builder.add_edge("smista_documenti", "validator")
 # Definizione dell'arco condizionale dal validatore
 builder.add_conditional_edges(
     "validator",
@@ -331,18 +433,17 @@ builder.add_conditional_edges(
     },
 )
 
+
 # Dal Writer andiamo alla Revisione Umana
 builder.add_edge("writer", "human_review")
 
 # L'arco condizionale del feedback umano (Loop di Correzione)
-builder.add_conditional_edges(
-    "human_review", check_human_approval, {"kg_update": "kg_update", "writer": "writer"}
-)
+
 
 # Dal salvataggio andiamo alla fine
 builder.add_edge("kg_update", END)
 memoria_temporanea = InMemorySaver()
 app = builder.compile(checkpointer=memoria_temporanea)
 
-with open("diagramma_agente.png", "wb") as f:
-    f.write(app.get_graph().draw_mermaid_png())
+# with open("diagramma_agente.png", "wb") as f:
+# f.write(app.get_graph().draw_mermaid_png())

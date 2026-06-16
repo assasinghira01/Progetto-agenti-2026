@@ -1,11 +1,11 @@
 import uuid
-import os
+
 from dotenv import load_dotenv
 
 # 1. Caricamento immediato delle variabili d'ambiente (api key, credenziali db)
 load_dotenv()
 
-from rag.vector_db import inizializza_vector_db
+from rag.vector_db import popola_database_rag
 from graph.workflow import app
 from langgraph.types import Command
 
@@ -16,7 +16,7 @@ def main():
     print("====================================================")
 
     # Inizializziamo o carichiamo il database vettoriale locale
-    inizializza_vector_db()
+    popola_database_rag()
 
     while True:
         print("\n=== MENU PRINCIPALE ===")
@@ -135,7 +135,7 @@ def main():
             scelta = input("1=APPROVA  2=MODIFICA  3=RIGENERA: ").strip()
 
             if scelta == "1":
-                comando = Command(resume="APPROVATO")
+                comando = Command(resume="APPROVA")
             elif scelta == "2":
                 modifica = input("Modifiche: ")
                 comando = Command(resume=modifica)

@@ -1,55 +1,67 @@
+import os
 from langchain_core.tools import tool
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 
-# Specifichiamo la stessa cartella usata in vector_db.py
-DB_DIR = "./chroma_db_cucina"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(BASE_DIR)
+DB_DIR = os.path.join(ROOT_DIR, "chroma_db_cucina")
+
+print("[SISTEMA] Inizializzazione motore di ricerca semantica RAG...")
+embeddings_locali = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+
+if os.path.exists(DB_DIR):
+    vector_store = Chroma(
+        persist_directory=DB_DIR, embedding_function=embeddings_locali
+    )
+else:
+    vector_store = None
+    print(
+        "[ATTENZIONE] Nessun database Chroma trovato. Esegui crea_vector_db.py prima."
+    )
 
 
 @tool
 def cerca_ricetta_nel_db(query: str) -> str:
     """
-    Usa ESCLUSIVAMENTE questo strumento per cercare le ricette ufficiali,
-    le dosi esatte, le grammature e i procedimenti base dei piatti.
-    Questa è la tua fonte di verità principale per gli ingredienti.
+    Usa ESCLUSIVAMENTE questo strumento per cercare preparazioni base,
+    ricette ufficiali del blog e liste di ingredienti nel tuo database RAG locale.
+    Questa è la FONTE DI VERITÀ ASSOLUTA per le ricette interne.
     """
+    if vector_store is None:
+        return "Errore di sistema: Il database locale non è inizializzato."
+
     try:
-        embeddings_locali = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-        )
-
-        vector_store = Chroma(
-            persist_directory=DB_DIR, embedding_function=embeddings_locali
-        )
-
-        # Prendiamo i 5 documenti più vicini semanticamente
+        SOGLIA_DISTANZA = 1.0
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
-        print(f"\n[DEBUG DISTANZE PER {query}]:")
         documenti_recuperati = []
 
         for doc, dist in risultati_con_distanza:
-            payload = doc.metadata.get("payload", "")
+            nome_file = doc.metadata.get("source", "File Sconosciuto")
 
-            # Estraiamo il titolo solo per fare un log pulito sul terminale
-            titolo = ""
-            if "Ricetta:" in payload:
-                titolo = payload.split("Ricetta:")[1].split("\n")[0].strip().lower()
+            # Bug 1: il filtro era SEPARATO dal loop che costruisce i risultati,
+            # quindi scartava ma poi aggiungeva tutto lo stesso nel secondo loop
+            if dist > SOGLIA_DISTANZA:
+                print(f"[RAG] Scartato '{nome_file}' (distanza {dist:.4f} > soglia)")
+                continue
 
-            print(f" -> Recuperato: {titolo[:30]}... | Distanza: {dist}")
-
-            documenti_recuperati.append(doc)
+            testo_chunk = doc.page_content
+            blocco_formattato = (
+                f"=== FONTE AUTOREVOLE LOCALE: {nome_file} ===\n"
+                f"{testo_chunk}\n"
+                f"==================="
+            )
+            documenti_recuperati.append(blocco_formattato)
+            print(f"[RAG DEBUG] Trovata: '{nome_file}' (distanza: {dist:.4f})")
 
         if documenti_recuperati:
-            # Uniamo i payload di tutti i documenti trovati
-            testo_risultati = "\n\n".join(
-                [res.metadata.get("payload", "") for res in documenti_recuperati]
-            )
-            return testo_risultati
+            return "\n\n".join(documenti_recuperati)
 
-        return "Nessuna ricetta trovata nel database locale."
+        return "Nessuna ricetta ufficiale pertinente trovata nel database locale."
 
     except Exception as e:
-        # Se fallisce di nuovo, questo print ti dirà l'errore esatto nel terminale
-        print(f"[DEBUG ERRORE CHROMA]: {str(e)}")
-        return f"Errore di connessione al database vettoriale: {str(e)}"
+        print(f"[RAG ERRORE]: {str(e)}")
+        return f"Errore interno del database vettoriale: {str(e)}"
