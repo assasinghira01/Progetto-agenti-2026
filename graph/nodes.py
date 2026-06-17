@@ -548,26 +548,45 @@ def krag_research_node(state: Blog_Cucina):
     messaggi = state.get("messages", [])
 
     prompt = f"""
-    Sei un Agente Investigatore esperto, specializzato in recupero dati culinari e Knowledge Fusion.
+    Sei un Agente Investigatore esperto, specializzato in recupero dati culinari.
     Il tuo obiettivo corrente è raccogliere dati completi per il topic: '{topic}'.
 
     ### PROTOCOLLO OPERATIVO (OBBLIGATORIO)
     Il tuo flusso di lavoro deve essere ciclico e atomico. PER OGNI SINGOLA AZIONE che intraprendi, DEVI seguire questo schema rigoroso:
     
-    1. **PENSIERO (THINK):** Prima di chiamare qualsiasi tool (Web o DB), devi invocare il 'think_tool'.
-       - Spiega quale azione stai per intraprendere.
-       - Spiega PERCHÉ questa azione è necessaria (es. "Il DB non ha dati, passo al web" o "Ho trovato un riferimento a una base, devo estrarla").
-       - Se stai eseguendo una fusione, motiva la necessità della sottoricetta.
+    1. **PENSIERO (THINK):** Prima di intraprendere qualisiasi azione e chiamare qualsiasi tool, devi invocare il 'think_tool' e devi:.
+       - Spiegare quale azione stai per intraprendere.
+       - Spiegare PERCHÉ questa azione è necessaria (es. "Il DB non ha dati, passo al web" o "Ho trovato una sottoricetta, vado a controllare se è presente nel DB").
+       - Se stai eseguendo una combinazione tra una ricetta trova online e una ricetta nel db motiva il perche della sottoricetta.
        - Concludi SEMPRE la tua riflessione con "STATO: CONTINUO" (se non hai ancora finito) o "STATO: FINITO" (se hai raccolto tutto).
     
-    2. **AZIONE (ACT):** Solo dopo aver registrato il pensiero, esegui il tool necessario ('cerca_ricetta_nel_db' o 'esegui_ricerca_web').
+    2. **FASI DI LAVORO(ACT):** 
+       - Per completare il tuo task, segui RIGOROSAMENTE questo flusso logico:
 
+    FASE A: RICERCA PRINCIPALE (Local-First)
+    1. La tua PRIMA AZIONE in assoluto deve essere interrogare il DB locale usando il tool `cerca_ricetta_nel_db` per il topic attuale: '{topic}'.
+    2. Valuta i dati ottenuti. I dati si considerano SUFFICIENTI solo se possiedi:
+       - Una lista completa di ingredienti con le relative dosi.
+       - Un procedimento chiaro e strutturato.
+    3. SE i dati del DB locale sono SUFFICIENTI: Il DB rappresenta la tua Fonte di Verità Assoluta. TI È VIETATO usare la ricerca Web. Passa direttamente alla Fase C.
+    4. SE i dati del DB locale sono ASSENTI o INSUFFICIENTI: Sei autorizzato a invocare il tool `esegui_ricerca_web` per ottenere la ricetta da internet.
+
+    FASE B: GESTIONE SOTTORICETTE (Ricette Complesse)
+    Se la ricetta che hai appena trovato (sia essa dal DB o dal Web) richiede una preparazione base aggiuntiva o una sottoricetta (es. Besciamella per le lasagne, Pasta frolla per una crostata, Maionese per un panino):
+    1. DEVI obbligatoriamente fare una nuova chiamata a `cerca_ricetta_nel_db` per cercare quella specifica sottoricetta.
+    2. SE la sottoricetta è presente nel DB: Usa rigorosamente gli ingredienti e il procedimento della sottoricetta locale e combinali con la ricetta principale.
+    3. SE la sottoricetta NON è presente nel DB: Sei autorizzato a usare `esegui_ricerca_web` per cercare anche la sottoricetta online.
+
+    FASE C: CONCLUSIONE
+    Quando hai raccolto tutti i dati necessari (ingredienti completi e procedimento di ricette ed eventuali sottoricette), dichiara lo STATO: FINITO.
+              
     ### REGOLE DI FERRO
     - NON saltare mai il 'think_tool'. L'assenza di riflessione prima di un'azione è considerata un errore grave.
+    - Tu sei l'Agente ricercatore dei dati. Il tuo unico scopo è trovare le ricette. NON DEVI in nessun caso cercare di scoprire se il post è già stato pubblicato sul blog o controllare i duplicati. Questo lavoro è già stato fatto. Concentrati solo sui dati culinari.
     - Se trovi una ricetta web che cita preparazioni base (Ragù, Besciamella, ecc.), NON procedere oltre finché non avrai cercato la versione ufficiale nel DB locale.
     - Non inventare dosi o procedimenti: se la fonte non è chiara, usa 'think_tool' per dichiarare l'insufficienza dei dati.
     - La tua missione termina SOLO quando hai il set completo (Ricetta Principale + eventuali Basi Ufficiali) e hai dichiarato "STATO: FINITO".
-
+    
     ### STATO ATTUALE
     Sei pronto ad agire. Inizia invocando il 'think_tool' per pianificare la prima mossa su '{topic}'.
     """
@@ -591,6 +610,8 @@ def validator_node(state: Blog_Cucina):
     topic = state["topic_corrente"]
     dati_db_locale = state.get("rag_documents", [])
     dati_web_grezzi = state.get("web_documents", [])
+    print(f"{dati_db_locale}")
+    print(f"{dati_web_grezzi}")
 
     # Pulizia e separazione dei blocchi web
     dati_web = []

@@ -32,19 +32,16 @@ def smista_documenti_node(state: Blog_Cucina):
     rag_docs = []
     web_docs = []
 
-    for msg in reversed(messaggi):
-
-        if msg.type in ["human", "ai"] and (rag_docs or web_docs):
-            break
-
-        if isinstance(msg, ToolMessage):
+    for msg in messaggi:
+        if getattr(msg, "type", "") == "tool":
             if msg.name == "cerca_ricetta_nel_db":
-                rag_docs.append(msg.content)
-            elif msg.name == "esegui_ricerca_web":
-                web_docs.append(msg.content)
+                # Aggiungiamo solo se non è un messaggio di errore
+                if "Errore" not in msg.content and "Nessuna ricetta" not in msg.content:
+                    rag_docs.append(msg.content)
 
-    rag_docs.reverse()
-    web_docs.reverse()
+            elif msg.name == "esegui_ricerca_web":
+                if "Nessuna ricetta" not in msg.content:
+                    web_docs.append(msg.content)
 
     print(
         f" -> [STATO] Estratti {len(rag_docs)} documenti RAG e {len(web_docs)} documenti WEB."

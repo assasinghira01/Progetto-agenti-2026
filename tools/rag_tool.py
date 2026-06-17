@@ -18,7 +18,9 @@ def inizializza_vector_store():
     global vector_store
     if os.path.exists(DB_DIR):
         vector_store = Chroma(
-            persist_directory=DB_DIR, embedding_function=embeddings_locali
+            persist_directory=DB_DIR,
+            embedding_function=embeddings_locali,
+            collection_metadata={"hnsw:space": "cosine"},
         )
         print("[RAG] Vector store caricato correttamente.")
     else:
@@ -28,16 +30,35 @@ def inizializza_vector_store():
 
 @tool
 def cerca_ricetta_nel_db(query: str) -> str:
+    # tecnia Hyde per il RAG, vogliamo volutamente che LLM allucini per favorire il recupero dei dati !
     """
-    Usa ESCLUSIVAMENTE questo strumento per cercare preparazioni base,
-    ricette ufficiali del blog e liste di ingredienti nel tuo database RAG locale.
-    Questa è la FONTE DI VERITÀ ASSOLUTA per le ricette interne.
+    [AZIONE OBBLIGATORIA]
+    Cerca una ricetta o preparazione base nel database vettoriale locale.
+
+    DIVIETO ASSOLUTO: Non usare MAI query brevi o parole generiche. È severamente
+    vietato usare query pigre come "Ricetta della maionese con ingredienti".
+
+    ISTRUZIONI HyDE (Hypothetical Document Embeddings):
+    Per abbattere le distanze vettoriali, PRIMA di invocare questo tool devi generare una
+    "Ricetta Ipotetica" e passarla come parametro 'query'. NON avere alcuna paura di sbagliare
+    dosi, ingredienti o tecniche: il tuo unico scopo è generare massa semantica per il database.
+
+    La tua stringa 'query' DEVE obbligatoriamente contenere queste 3 cose:
+    1. Nome del piatto.
+    2. Lista esplicita e reale degli ingredienti (deduci tu i principali, es. uova, farina, burro...).
+    3. Un mini-procedimento discorsivo (spiega l'azione tecnica: frullare, infornare, mantecare...).
+
+    ESEMPIO DI QUERY CORRETTA E RIGOROSA CHE DEVI EMULARE:
+    "Ricetta completa per la maionese. Ingredienti: tuorli d'uovo, olio di semi, succo di limone, sale. Procedimento: Mettere i tuorli in una ciotola, aggiungere il limone e frullare versando l'olio a filo lentamente fino a montare l'emulsione."
+
+    ESEMPIO DI QUERY ERRATA DA SCARTARE:
+    "Ricetta della maionese con ingredienti e procedimento."
     """
     if vector_store is None:
         return "Errore di sistema: Il database locale non è inizializzato."
 
     try:
-        SOGLIA_DISTANZA = 0.75
+        SOGLIA_DISTANZA = 0.2
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         documenti_recuperati = []
