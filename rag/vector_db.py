@@ -15,7 +15,12 @@ DB_DIR = os.path.join(ROOT_DIR, "chroma_db_cucina")
 CARTELLA_RICETTE = os.path.join(ROOT_DIR, "ricettario_md")
 
 
-def popola_database_rag():
+def popola_database_rag(force_rebuild=False):
+
+    if os.path.exists(DB_DIR) and os.listdir(DB_DIR) and not force_rebuild:
+        print(f"[RAG] Database già esistente in '{DB_DIR}'. Skip creazione.")
+        return
+
     print(f"1. Scansione della cartella '{CARTELLA_RICETTE}' in corso...")
 
     loader = DirectoryLoader(
@@ -23,8 +28,13 @@ def popola_database_rag():
         glob="**/*.md",
         loader_cls=TextLoader,
         loader_kwargs={"encoding": "utf-8"},  # Fix encoding
+        use_multithreading=False,
     )
     documenti = loader.load()
+    print(f" -> Caricati {len(documenti)} documenti (attesi: 20)")
+    for doc in documenti:
+        nome = doc.metadata.get("source", "sconosciuto")
+        print(f"    [{len(doc.page_content)} chars] {nome.split(chr(92))[-1]}")
 
     if not documenti:
         print("Nessun file Markdown trovato.")
@@ -33,9 +43,7 @@ def popola_database_rag():
     print(f" -> Trovate {len(documenti)} ricette base.")
     print("2. Inizializzazione del modello di Embeddings...")
 
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    )
+    embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
 
     print("3. Creazione del Vector Store (ChromaDB)...")
 

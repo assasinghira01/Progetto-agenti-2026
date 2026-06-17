@@ -8,19 +8,22 @@ ROOT_DIR = os.path.dirname(BASE_DIR)
 DB_DIR = os.path.join(ROOT_DIR, "chroma_db_cucina")
 
 print("[SISTEMA] Inizializzazione motore di ricerca semantica RAG...")
-embeddings_locali = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-)
+embeddings_locali = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
 
-if os.path.exists(DB_DIR):
-    vector_store = Chroma(
-        persist_directory=DB_DIR, embedding_function=embeddings_locali
-    )
-else:
-    vector_store = None
-    print(
-        "[ATTENZIONE] Nessun database Chroma trovato. Esegui crea_vector_db.py prima."
-    )
+vector_store = None
+
+
+def inizializza_vector_store():
+    """Carica il vector store dal DB. Va chiamata dopo popola_database_rag()."""
+    global vector_store
+    if os.path.exists(DB_DIR):
+        vector_store = Chroma(
+            persist_directory=DB_DIR, embedding_function=embeddings_locali
+        )
+        print("[RAG] Vector store caricato correttamente.")
+    else:
+        vector_store = None
+        print("[RAG] Nessun database Chroma trovato.")
 
 
 @tool
@@ -34,7 +37,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
         return "Errore di sistema: Il database locale non è inizializzato."
 
     try:
-        SOGLIA_DISTANZA = 1.0
+        SOGLIA_DISTANZA = 0.75
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         documenti_recuperati = []

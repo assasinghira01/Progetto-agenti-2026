@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from rag.vector_db import popola_database_rag
+from tools.rag_tool import inizializza_vector_store
 from graph.workflow import app
 from langgraph.types import Command
 
@@ -17,6 +18,7 @@ def main():
 
     # Inizializziamo o carichiamo il database vettoriale locale
     popola_database_rag()
+    inizializza_vector_store()
 
     while True:
         print("\n=== MENU PRINCIPALE ===")
