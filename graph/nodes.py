@@ -545,16 +545,17 @@ def krag_research_node(state: Blog_Cucina):
     print("\n--- [NODO 2: RICERCA MCP (Agente Autonomo)] ---")
     topic = state["topic_corrente"]
     print(f"{topic}")
+    reasoning_trace = state.get("reasoning_trace", [])
     messaggi = state.get("messages", [])
 
-    prompt = f"""
+    testo = f"""
     Sei un Agente Investigatore esperto, specializzato in recupero dati culinari.
     Il tuo obiettivo corrente è raccogliere dati completi per il topic: '{topic}'.
 
     ### PROTOCOLLO OPERATIVO (OBBLIGATORIO)
     Il tuo flusso di lavoro deve essere ciclico e atomico. PER OGNI SINGOLA AZIONE che intraprendi, DEVI seguire questo schema rigoroso:
     
-    1. **PENSIERO (THINK):** Prima di intraprendere qualisiasi azione e chiamare qualsiasi tool, devi invocare il 'think_tool' e devi:.
+    1. **PENSIERO (THINK):**  Dopo ogni utilizzo dei tool e prima di intraprendere qualisiasi azione e chiamare qualsiasi tool, devi invocare il 'think_tool' e devi:.
        - Spiegare quale azione stai per intraprendere.
        - Spiegare PERCHÉ questa azione è necessaria (es. "Il DB non ha dati, passo al web" o "Ho trovato una sottoricetta, vado a controllare se è presente nel DB").
        - Se stai eseguendo una combinazione tra una ricetta trova online e una ricetta nel db motiva il perche della sottoricetta.
@@ -564,40 +565,67 @@ def krag_research_node(state: Blog_Cucina):
        - Per completare il tuo task, segui RIGOROSAMENTE questo flusso logico:
 
     FASE A: RICERCA PRINCIPALE (Local-First)
-    1. La tua PRIMA AZIONE in assoluto deve essere interrogare il DB locale usando il tool `cerca_ricetta_nel_db` per il topic attuale: '{topic}'.
-    2. Valuta i dati ottenuti. I dati si considerano SUFFICIENTI solo se possiedi:
+    1. ESTRAZIONE SEMANTICA (KG): La tua primissima azione deve essere invocare il tool `get_ingredienti` per estrarre la conoscenza storica dal Knowledge Graph sul topic '{topic}'.
+    2. RICERCA VETTORIALE (Locale): Invoca il tool `cerca_ricetta_nel_db`. 
+       - Se il KG ti ha fornito dati al punto 1, usali obbligatoriamente per formare la query.
+       - Se il KG ti ha risposto che non ci sono dati, procedi lo stesso formulando tu una query espansa coerente.
+    3. VALUTAZIONE: Valuta i dati ottenuti dal DB locale. Sono SUFFICIENTI solo se possiedi:
        - Una lista completa di ingredienti con le relative dosi.
        - Un procedimento chiaro e strutturato.
-    3. SE i dati del DB locale sono SUFFICIENTI: Il DB rappresenta la tua Fonte di Verità Assoluta. TI È VIETATO usare la ricerca Web. Passa direttamente alla Fase C.
-    4. SE i dati del DB locale sono ASSENTI o INSUFFICIENTI: Sei autorizzato a invocare il tool `esegui_ricerca_web` per ottenere la ricetta da internet.
+    4. BIFORCAZIONE
+       - SE i dati del DB locale sono SUFFICIENTI: Il DB rappresenta la tua Fonte di Verità Assoluta. TI È VIETATO usare la ricerca Web. Passa direttamente alla Fase C.
+       - SE i dati del DB locale sono ASSENTI o INSUFFICIENTI: Sei autorizzato a invocare il tool `esegui_ricerca_web` per recuperare ricette da internet.
+       ATTENZIONE WEB: Se usi il web, il tool ti restituirà più documenti. NON FONDERLI e non cercare di sceglierne uno. Il tuo compito di ricerca principale è concluso, i documenti sono stati messi a sistema. PASSA ALLA FASE B.
 
-    FASE B: GESTIONE SOTTORICETTE (Ricette Complesse)
-    Se la ricetta che hai appena trovato (sia essa dal DB o dal Web) richiede una preparazione base aggiuntiva o una sottoricetta (es. Besciamella per le lasagne, Pasta frolla per una crostata, Maionese per un panino):
-    1. DEVI obbligatoriamente fare una nuova chiamata a `cerca_ricetta_nel_db` per cercare quella specifica sottoricetta.
-    2. SE la sottoricetta è presente nel DB: Usa rigorosamente gli ingredienti e il procedimento della sottoricetta locale e combinali con la ricetta principale.
-    3. SE la sottoricetta NON è presente nel DB: Sei autorizzato a usare `esegui_ricerca_web` per cercare anche la sottoricetta online.
+    FASE B: CACCIA ALLE SOTTORICETTE (Cruciale)
+    Leggendo gli ingredienti della ricetta appena trovata (dal DB o dal Web), domandati: 
+    "Questa ricetta richiede una preparazione base complessa?" (es. Maionese per l'insalata russa, Pasta frolla per le crostate,ragu,besciamella,pastelle per i fritti,impasti ecc....).
+    - SE SÌ: Usa IMMEDIATAMENTE  il tool get ingredienti per effetturae la query espansa su `cerca_ricetta_nel_db` per cercare QUELLA specifica sottoricetta. Se non è nel DB, usa `esegui_ricerca_web` per la sottoricetta.
+    - SE NO: Passa alla Fase C.
 
     FASE C: CONCLUSIONE
-    Quando hai raccolto tutti i dati necessari (ingredienti completi e procedimento di ricette ed eventuali sottoricette), dichiara lo STATO: FINITO.
-              
-    ### REGOLE DI FERRO
-    - NON saltare mai il 'think_tool'. L'assenza di riflessione prima di un'azione è considerata un errore grave.
-    - Tu sei l'Agente ricercatore dei dati. Il tuo unico scopo è trovare le ricette. NON DEVI in nessun caso cercare di scoprire se il post è già stato pubblicato sul blog o controllare i duplicati. Questo lavoro è già stato fatto. Concentrati solo sui dati culinari.
-    - Se trovi una ricetta web che cita preparazioni base (Ragù, Besciamella, ecc.), NON procedere oltre finché non avrai cercato la versione ufficiale nel DB locale.
-    - Non inventare dosi o procedimenti: se la fonte non è chiara, usa 'think_tool' per dichiarare l'insufficienza dei dati.
-    - La tua missione termina SOLO quando hai il set completo (Ricetta Principale + eventuali Basi Ufficiali) e hai dichiarato "STATO: FINITO".
+    Quando hai messo a sistema la Ricetta Principale + TUTTE le eventuali Sottoricette necessarie, dichiara "STATO: FINITO".
+    
+    
+    ### REGOLE DI FERRO: I TUOI DIVIETI
+    1. DIVIETO DI FUSIONE: Se trovi 2 ricette web diverse per l'Insalata Russa, NON unire i loro ingredienti. Il tuo lavoro è solo recuperarle, il Validatore sceglierà la migliore.
+    2. DIVIETO DI IGNORARE LE SOTTORICETTE: Non puoi dichiarare "STATO: FINITO" se NON SEI SICURO CHE NON SIANO PIù SOTTORICETTE
+    3. DIVIETO DI OMISSIONE DEL THINK: L'uso del 'think_tool' è obbligatorio ad ogni ciclo.
     
     ### STATO ATTUALE
     Sei pronto ad agire. Inizia invocando il 'think_tool' per pianificare la prima mossa su '{topic}'.
     """
 
+    prompt = SystemMessage(content=testo)
     if not messaggi:
         messaggi_da_inviare = [
             prompt,
             HumanMessage(content=f"Inizia la ricerca per il topic: {topic}"),
         ]
+
     else:
-        messaggi_da_inviare = [prompt] + messaggi
+
+        if reasoning_trace:
+
+            ultime_riflessioni = [
+                r for r in reasoning_trace if r.startswith("[RESEARCH]")
+            ]
+
+            riepilogo = "\n".join(
+                f"- {r.replace('[RESEARCH] ', '')}" for r in ultime_riflessioni
+            )
+
+            contesto_trace = f"""
+            ### RIEPILOGO DEL TUO RAGIONAMENTO FINORA
+            Queste sono le tue ultime riflessioni su questo topic.
+            Usale per non ripetere azioni già fatte e per decidere il passo successivo:
+            {riepilogo}
+            """
+        else:
+            contesto_trace = ""
+
+        prompt_aggiornato = SystemMessage(content=testo + "\n" + contesto_trace)
+        messaggi_da_inviare = [prompt_aggiornato] + messaggi
 
     risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
 
@@ -606,133 +634,149 @@ def krag_research_node(state: Blog_Cucina):
 
 def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
-
     topic = state["topic_corrente"]
     dati_db_locale = state.get("rag_documents", [])
     dati_web_grezzi = state.get("web_documents", [])
-    print(f"{dati_db_locale}")
-    print(f"{dati_web_grezzi}")
+    messaggi = state.get("messages", [])
 
-    # Pulizia e separazione dei blocchi web
-    dati_web = []
-    for blocco in dati_web_grezzi:
-        if isinstance(blocco, str) and "--- Fonte Web:" in blocco:
-            estratti = blocco.split("--- Fonte Web:")
-            for estratto in estratti:
-                if estratto.strip():
-                    dati_web.append("--- Fonte Web:" + estratto)
-        else:
-            dati_web.append(blocco)
+    print("RAG DOCUMENTS:")
+    print(len(dati_db_locale))
 
-    # Numerazione dei documenti del DB Locale per l'LLM
+    for i, doc in enumerate(dati_db_locale):
+        print(f"DOC {i}")
+        print(doc[:200])
+
+    testo_db = "NESSUNA RICETTA TROVATA NEL DB LOCALE"
     if dati_db_locale:
-        db_numerati = []
-        for idx, doc in enumerate(dati_db_locale):
-            db_numerati.append(f"\n=== DB_DOC_{idx} ===\n{doc}\n")
-        testo_db = "\n".join(db_numerati)
-    else:
-        testo_db = "NESSUNA RICETTA TROVATA NEL DB LOCALE"
+        testo_db = "".join(
+            f"\n=== DB_DOC_{idx} ===\n{doc}\n" for idx, doc in enumerate(dati_db_locale)
+        )
 
-    # Numerazione dei documenti web per l'LLM
-    if dati_web:
-        web_numerati = []
-        for idx, doc in enumerate(dati_web):
-            web_numerati.append(f"\n=== WEB_DOC_{idx} ===\n{doc}\n")
-        testo_web = "\n".join(web_numerati)
-    else:
-        testo_web = "NESSUN DATO COLLATERALE DAL WEB"
+    testo_web = "NESSUN DATO COLLATERALE DAL WEB"
+    if dati_web_grezzi:
+        testo_web = "".join(
+            f"\n=== WEB_DOC_{idx} ===\n{doc}\n"
+            for idx, doc in enumerate(dati_web_grezzi)
+        )
 
-    prompt = f"""
-Analizza la fattibilità editoriale per il piatto: '{topic}'.
+    # ── PRIMA PASSATA: messaggi vuoti → manda al think_tool ──
+    if not messaggi:
 
-=== FONTE DI VERITÀ INTERNA (DB LOCALE) ===
-{testo_db}
+        prompt_riflessione = f"""
+        Sei un validatore esperto di ricettari. Il tuo compito è analizzare i documenti recuperati per il topic: '{topic}'.
 
-=== INFORMAZIONI DI CONTESTO (RICERCA WEB) ===
-{testo_web}
+        === ISTRUZIONI DI VALUTAZIONE ===
+        Per OGNI documento (DB e WEB) devi eseguire questi 3 passaggi obbligatori nel tuo ragionamento (think_tool):
+        1. Estrai il TITOLO REALE dalla prima riga del documento.
+        2. Confronta il titolo con il topic '{topic}'.
+        3. Assegna uno SCORE rigoroso basandoti su queste regole:
 
-COMPITO E CRITERI DI VALUTAZIONE:
+        === REGOLE DI SCORING ===
+        - SCORE 1 (FONDAMENTALE): È la ricetta precisa del topic '{topic}' O la sua sottoricetta indispensabile (es. Besciamella per Cannelloni).
+        - SCORE 0 (IRRILEVANTE): Qualsiasi documento che parla di un piatto diverso (es una variante) o che non c'entra nulla.
+        === REGOLA D'ORO PER IL WEB (DEDUPLICAZIONE) ===
+        Ti sono stati forniti documenti da DB e WEB. 
+        - Se trovi due o più documenti che trattano la STESSA ricetta (es. due ricette di 'Cannelloni Ricotta e Spinaci'):
+        1. Confronta la loro qualità (punteggio della fonte).
+        2. Assegna SCORE 1 SOLO AL MIGLIORE.
+        3. Assegna SCORE 0 A TUTTI GLI ALTRI (anche se sono buoni, per evitare ridondanze).
+        - NON inviare al Writer più di una fonte per la stessa ricetta o sottoricetta.
+         
+        === DOCUMENTI DA VALUTARE ===
+        [DB LOCALE]
+        {testo_db}
 
-1. SENSO GASTRONOMICO:
-   Blocca ricette assurde o accostamenti privi di senso.
-2. SUFFICIENZA DEI DATI:
-   Verifica se abbiamo abbastanza informazioni per scrivere un articolo attendibile.
-3. PERTINENZA DEL DB LOCALE:
-   Identifica quali documenti del DB locale parlano ESATTAMENTE del topic '{topic}'.
-   Inserisci gli indici numerici (es. 0, 1) nel campo 'documenti_db_approvati'. 
-   Se contengono ricette completamente scollegate (es. cerchi Besciamella e trovi Pan di zenzero), IGNORALI.
-4. ESITO:
-   - True se il topic è valido e documentato.
-   - False se il topic è assurdo oppure non esistono dati utilizzabili.
+        [WEB]
+        {testo_web}
 
-5. QUALITÀ FONTI WEB:
-   I documenti web sono identificati come: WEB_DOC_0, WEB_DOC_1...
-   Seleziona SOLO gli ID dei documenti migliori.
-   DEVE essere scelto un solo documento. La scelta deve essere basata sulla pertinenza, autorevolezza e completezza.
-   Inserisci gli ID nel campo: documenti_web_approvati
+        === FORMATO OUTPUT OBBLIGATORIO NEL RAGIONAMENTO ===
+        Per ogni documento scrivi esattamente così:
+        - ID_DOC [TITOLO ESTRATTO]: Score X - Motivo: ...
+        Esempio: - DB_DOC_0 [Pasta alla Norma]: Score 0 - Parla di Norma, non di Cannelloni.
+
+        Se il contenuto non corrisponde al topic o a una sottoricetta necessaria, il voto deve essere 0. 
+        NON inventare correlazioni. Se il documento non è pertinente, assegna 0.
+
+        Concludi con:
+        STATO: FINITO
 """
+        messaggio = [
+            SystemMessage(content=prompt_riflessione),
+            HumanMessage(content=f"Analizza i documenti per '{topic}'."),
+        ]
+        risposta = llm_con_tools.invoke(messaggio)
 
-    llm_validator = llm.with_structured_output(ValidationResult)
-    esito = llm_validator.invoke([HumanMessage(content=prompt)])
+        return {"messages": [risposta], "nodo_chiamante": "validator"}
 
-    print(f" Esito Validazione: {esito.is_valid}")
-    print(f" Motivazione: {esito.reasoning}")
-    print(f" Usa DB Locale: {esito.usa_db_locale}")
-    print(f" Documenti DB Approvati: {esito.documenti_db_approvati}")
-    print(f" Documenti Web Approvati: {esito.documenti_web_approvati}")
+    # ── SECONDA PASSATA: leggi la riflessione dai messaggi e dai il verdetto ──
+    # Il tool_node ha già stampato il ragionamento, ci basta il contenuto
+    riflessione_testo = ""
+    for msg in reversed(messaggi):
+        if isinstance(msg, ToolMessage) and msg.name == "think_tool":
+            riflessione_testo = msg.content.replace(
+                "Riflessione registrata con successo: ", ""
+            ).strip()
+            break
 
-    # =========================================================
-    # PRUNING DELLO STATO (FILTRAGGIO MATEMATICO)
-    # =========================================================
+    prompt_verdetto = f"""
+Sulla base di questa tua analisi:
+{riflessione_testo}
 
-    # 1. Filtriamo i documenti WEB
-    dati_web_filtrati = []
-    for idx in esito.documenti_web_approvati:
-        if 0 <= idx < len(dati_web):
-            dati_web_filtrati.append(dati_web[idx])
-
-    # 2. Filtriamo i documenti del DB LOCALE
-    dati_db_filtrati = []
-
-    if not esito.usa_db_locale:
-        print("[VALIDATORE] DB locale non pertinente.")
-    else:
-        print("[VALIDATORE] Estraggo solo le ricette pertinenti...")
-
-        for idx in esito.documenti_db_approvati:
-
-            if 0 <= idx < len(dati_db_locale):
-
-                doc = dati_db_locale[idx]
-
-                # Caso mega-chunk con più ricette
-                if "Ricetta:" in doc:
-
-                    blocchi = doc.split("Ricetta:")
-
-                    for blocco in blocchi:
-
-                        if topic.lower().strip() in blocco.lower():
-
-                            dati_db_filtrati.append("Ricetta: " + blocco.strip())
-
-            else:
-                # Documento singolo normale
-                if topic.lower().strip() in doc.lower():
-                    dati_db_filtrati.append(doc)
-
-    direttiva = (
-        f"Fonte web: {esito.documenti_web_approvati}. "
-        f"Fonte DB: {esito.documenti_db_approvati}. "
-        f"Motivazione: {esito.motivazione_qualita}"
+Produci il verdetto strutturato per '{topic}'.
+- documenti_db_approvati: indici DB_DOC utili (es. [0, 1])
+- documenti_web_approvati: UN solo indice WEB_DOC (il migliore)
+- is_valid: True se i dati sono sufficienti per scrivere l'articolo
+- usa_db_locale: True se almeno un DB_DOC è stato approvato
+"""
+    esito = llm.with_structured_output(ValidationResult).invoke(
+        [HumanMessage(content=prompt_verdetto)]
     )
 
-    print(f" Dati web finali passati al writer: {len(dati_web_filtrati)} documenti")
-    print(f" Dati DB finali passati al writer: {len(dati_db_filtrati)} documenti")
+    print(f"\n Esito Validazione (is_valid): {esito.is_valid}")
+    print(f" Motivazione Generale: {esito.motivazione_qualita}")
+
+    # re-ranking e pruning dati db
+
+    dati_db_filtrati = []
+
+    for d in esito.ranking_db:
+        print(d.id, d.score, d.motivo)
+
+    if dati_db_locale and esito.ranking_db:
+        db_ordinato = sorted(esito.ranking_db, key=lambda x: x.score, reverse=True)
+
+        print(f"{db_ordinato}")
+
+        for d in db_ordinato:
+
+            if d.score == 2:
+
+                dati_db_filtrati.append(dati_db_locale[d.id])
+
+        print(f"{dati_db_filtrati}")
+
+    # re-ranking e pruning dati web
+
+    dati_web_filtrati = []
+
+    for d in esito.ranking_web:
+        print(d.id, d.score, d.motivo)
+
+    if dati_web_grezzi and esito.ranking_web:
+
+        web_ordinato = sorted(esito.ranking_web, key=lambda x: x.score, reverse=True)
+
+        for d in web_ordinato:
+
+            if d.score == 2:
+
+                dati_web_filtrati.append(dati_web_grezzi[d.id])
+
+    messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in messaggi]
 
     return {
+        "messages": messaggi_da_cancellare,
         "is_valid": esito.is_valid,
-        "valutazione_qualita": direttiva,
         "approved_web_documents": dati_web_filtrati,
         "approved_db_documents": dati_db_filtrati,
     }
@@ -742,11 +786,12 @@ COMPITO E CRITERI DI VALUTAZIONE:
 def writer_node(state: Blog_Cucina):
     print("\n--- [NODO 4: WRITER (Sintesi e Grounding)] ---")
     topic = state["topic_corrente"]
-    dati_db_locale = state.get("rag_documents", [])
+    dati_db_locale = state.get("approved_db_documents", [])
     dati_web = state.get("approved_web_documents", [])
     testo_db = "\n".join(dati_db_locale) if dati_db_locale else "NESSUN DATO IN LOCALE"
     testo_web = "\n".join(dati_web) if dati_web else "NESSUN DATO DAL WEB"
     feedback = state.get("human_feedback")
+
     print(f"datiweb: {testo_web}")
     print(f"datilocale: {testo_db}")
     istruzione_correzione = (

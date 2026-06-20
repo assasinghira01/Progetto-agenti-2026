@@ -10,10 +10,8 @@ class CucinaKnowledgeGraph:
 
         print("[NEO4J] Inizializzazione embeddings locali per il Grafo...")
         # Usiamo lo STESSO modello di ChromaDB.
-        # Questo modello produce vettori a 384 dimensioni.
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-        )
+        # Questo modello produce vettori a 1024 dimensioni.
+        self.embeddings = HuggingFaceEmbeddings(model_name="BAAI/bge-m3")
 
         # Creiamo l'indice vettoriale
         self._crea_indice_vettoriale()
@@ -24,7 +22,7 @@ class CucinaKnowledgeGraph:
         CREATE VECTOR INDEX recipe_embedding_index IF NOT EXISTS
         FOR (r:Ricetta) ON (r.embedding)
         OPTIONS {indexConfig: {
-          `vector.dimensions`: 384,
+          `vector.dimensions`: 1024,
           `vector.similarity_function`: 'cosine'
         }}
         """
@@ -142,7 +140,7 @@ class CucinaKnowledgeGraph:
 
         op_madre = topic_originale.strip().capitalize()
         op_finale = topic_finale.strip().capitalize()
-        data_oggi = datetime.datetime.now().strftime("%Y-%m-%d")
+        data_oggi = datetime.now().strftime("%Y-%m-%d")
         titolo_post = f"Post su {op_finale} - {data_oggi}"
 
         is_variante = op_madre.lower() != op_finale.lower()

@@ -23,42 +23,22 @@ class PianoEditoriale(BaseModel):
     )
 
 
+class RankedDocument(BaseModel):
+    id: int
+    score: int = Field(description="0 irrilevante, 1 utile, 2 fondamentale")
+    motivo: str = Field(
+        description="Breve motivazione per lo score assegnato a questo specifico documento"
+    )
+
+
 class ValidationResult(BaseModel):
     is_valid: bool = Field(
-        description=(
-            "True se le fonti sono coerenti e contengono una ricetta "
-            "logica e fattibile. False se la richiesta contiene assurdità "
-            "o mancano dati fondamentali."
-        )
+        description="True se i dati approvati (score >= 1) sono sufficienti per scrivere l'articolo"
     )
-
-    reasoning: str = Field(description="Spiegazione della validazione generale.")
-
-    usa_db_locale: bool = Field(
-        description=(
-            "True se i documenti recuperati dal DB locale sono pertinenti "
-            "al topic richiesto. False se il retrieval locale ha restituito "
-            "ricette completamente diverse o non utili."
-        )
-    )
-
-    documenti_web_approvati: List[int] = Field(
-        description=(
-            "Lista degli ID numerici dei documenti web approvati. "
-            "Usa gli ID mostrati come WEB_DOC_X. "
-            "Normalmente deve contenere un solo ID."
-        )
-    )
-
-    documenti_db_approvati: List[int] = Field(
-        default_factory=list,
-        description="Lista contenente gli ID dei documenti del DB locale ritenuti pertinenti.",
-    )
+    ranking_db: list[RankedDocument]
+    ranking_web: list[RankedDocument]
     motivazione_qualita: str = Field(
-        description=(
-            "Motiva brevemente la scelta della fonte web approvata "
-            "e l'eventuale esclusione delle altre."
-        )
+        description="Giudizio generale finale sul set di documenti recuperato"
     )
 
 

@@ -1,4 +1,5 @@
 import os
+import json
 from langchain_core.tools import tool
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -35,18 +36,22 @@ def cerca_ricetta_nel_db(query: str) -> str:
     [AZIONE OBBLIGATORIA]
     Cerca una ricetta o preparazione base nel database vettoriale locale.
 
-    DIVIETO ASSOLUTO: Non usare MAI query brevi o parole generiche. È severamente
-    vietato usare query pigre come "Ricetta della maionese con ingredienti".
+    DIVIETO ASSOLUTO: Non usare MAI query brevi o parole generiche (es. vietato "Ricetta della maionese").
+    Devi generare un documento ipotetico denso di contesto (HyDE) per abbattere le distanze vettoriali.
 
-    ISTRUZIONI HyDE (Hypothetical Document Embeddings):
-    Per abbattere le distanze vettoriali, PRIMA di invocare questo tool devi generare una
-    "Ricetta Ipotetica" e passarla come parametro 'query'. NON avere alcuna paura di sbagliare
-    dosi, ingredienti o tecniche: il tuo unico scopo è generare massa semantica per il database.
+    ISTRUZIONI DI GENERAZIONE DELLA QUERY (K-RAG ibrido):
+    La tua query deve essere un paragrafo discorsivo generato seguendo rigorosamente UNA di queste due casistiche:
 
-    La tua stringa 'query' DEVE obbligatoriamente contenere queste 3 cose:
-    1. Nome del piatto.
-    2. Lista esplicita e reale degli ingredienti (deduci tu i principali, es. uova, farina, burro...).
-    3. Un mini-procedimento discorsivo (spiega l'azione tecnica: frullare, infornare, mantecare...).
+    CASO A - K-RAG PURO (Se hai estratto dati dal Knowledge Graph in precedenza):
+    Se possiedi già una lista di ingredienti o concetti storici recuperati dal grafo, la tua query DEVE
+    contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici.
+    Sei autorizzato a inventare solo il procedimento tecnico (es. frullare, infornare) per legare le parole.
+
+    CASO B - HyDE FALLBACK (Se il Knowledge Graph era vuoto o non hai dati pregressi):
+    Se il piatto è inedito, devi allucinare tu l'intero documento. La tua query DEVE contenere:
+    1. Il nome del piatto.
+    2. Una lista coerente di ingredienti dedotti dalla tua conoscenza interna (es. se cerchi maionese: uova, olio, limone).
+    3. Un mini-procedimento tecnico discorsivo.
 
     ESEMPIO DI QUERY CORRETTA E RIGOROSA CHE DEVI EMULARE:
     "Ricetta completa per la maionese. Ingredienti: tuorli d'uovo, olio di semi, succo di limone, sale. Procedimento: Mettere i tuorli in una ciotola, aggiungere il limone e frullare versando l'olio a filo lentamente fino a montare l'emulsione."
@@ -58,7 +63,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
         return "Errore di sistema: Il database locale non è inizializzato."
 
     try:
-        SOGLIA_DISTANZA = 0.2
+        SOGLIA_DISTANZA = 0.4
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         documenti_recuperati = []
@@ -82,7 +87,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
             print(f"[RAG DEBUG] Trovata: '{nome_file}' (distanza: {dist:.4f})")
 
         if documenti_recuperati:
-            return "\n\n".join(documenti_recuperati)
+            return json.dumps(documenti_recuperati, ensure_ascii=False)
 
         return "Nessuna ricetta ufficiale pertinente trovata nel database locale."
 

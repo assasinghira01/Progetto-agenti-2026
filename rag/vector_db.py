@@ -55,7 +55,7 @@ def popola_database_rag(force_rebuild=False):
         documents=documenti,
         embedding=embeddings,
         persist_directory=DB_DIR,
-        # collection_metadata={"hnsw:space": "cosine"},
+        collection_metadata={"hnsw:space": "cosine"},
     )
 
     print("\n Database vettoriale RAG popolato con successo!")

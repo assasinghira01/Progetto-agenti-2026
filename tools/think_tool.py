@@ -31,20 +31,34 @@ def think_tool(reflection: str) -> str:
     ========================================================================
     === FASE 2: RICERCA E FUSIONE DATI (RESEARCH)                        ===
     ========================================================================
-    Sei in questa fase quando stai raccogliendo ingredienti e procedimento
-    per scrivere l'articolo di un singolo piatto.
+    Sei in questa fase quando stai raccogliendo ingredienti e procedimento.
 
-    * Usa "STATO: CONTINUO" se:
-      - Hai trovato la ricetta principale, ma hai identificato che utilizza
-        delle sottoricette (es. Ragù, Besciamella, Brodo).
-      - Devi usare il tool `cerca_ricetta_nel_db` per recuperare la nostra
-        versione locale di quella sottoricetta.
-      - I dati trovati finora sono insufficienti o nulli.
+    * * Usa "STATO: CONTINUO" se:
+      - Hai trovato la ricetta principale, ma hai notato ingredienti che rappressentano sottoricette come Maionese,
+        Ragù, Brodo, Besciamella, ecc., e devi ancora cercarli.
+      - I dati trovati finora sono insufficienti o stai per cambiare fonte.
 
     * Usa "STATO: FINITO" SOLO se:
       - Hai raccolto la ricetta principale in modo esaustivo.
-      - Hai GIÀ recuperato dal DB locale TUTTE le eventuali sottoricette necessarie.
-      - Hai tutti i dati completi e sei pronto per far scrivere il post al Writer.
+      - Hai GIÀ cercato e  recuperato TUTTE le eventuali sottoricette necessarie.
+      - Hai tutti i dati completi e Non devi cercare più nulla.
+
+
+      ========================================================================
+      FASE 3 - VALIDAZIONE E RE-RANKING (SCORING)
+      ========================================================================
+      Obiettivo: Valutare l'utilità di OGNI singola fonte recuperata (DB e Web).
+      Usa "STATO: CONTINUO" se:
+      - ci sono moltissimi documenti e hai bisogno di riflettere in più passaggi prima di dare i voti definitivi.
+      Usa "STATO: FINITO" SOLO se:
+      - hai analizzato mentalmente OGNI documento DB e WEB presente;
+      - hai deciso quale punteggio (0=Irrilevante o inutile, 1=Fondamentale) merita ogni documento;
+      - hai formulato un motivo conciso per ogni punteggio assegnato;
+      - hai stabilito se i documenti approvati (score == 1) bastano per scrivere un articolo di alta qualità.
+
+      REGOLA FONDAMENTALE
+
+      Durante il ragionamento rispetta l'ordine preciso dei documenti, saltare o sbagliare documento è INAMISSIBILE
 
     Args:
         reflection: Il testo del tuo ragionamento che spiega cosa hai capito

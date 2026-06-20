@@ -10,6 +10,7 @@ class Blog_Cucina(MessagesState):
     nodo_chiamante: str
     reasoning_trace: Annotated[list[str], operator.add]
     blacklist_topics: list[str]
+    richiede_variante: bool
     kg_context: Annotated[List[str], operator.add]
     rag_documents: Annotated[List[str], operator.add]
     web_documents: Annotated[List[str], operator.add]

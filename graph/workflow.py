@@ -1,3 +1,4 @@
+import json
 from typing import Literal
 
 from langgraph.graph import StateGraph, START, END
@@ -37,17 +38,27 @@ def smista_documenti_node(state: Blog_Cucina):
             if msg.name == "cerca_ricetta_nel_db":
                 # Aggiungiamo solo se non è un messaggio di errore
                 if "Errore" not in msg.content and "Nessuna ricetta" not in msg.content:
-                    rag_docs.append(msg.content)
+
+                    try:
+                        lista_ricette = json.loads(msg.content)
+                        rag_docs.extend(lista_ricette)
+                    except json.JSONDecodeError:
+                        pass
 
             elif msg.name == "esegui_ricerca_web":
                 if "Nessuna ricetta" not in msg.content:
-                    web_docs.append(msg.content)
+                    lista_ricette_web = msg.content.split("\n\n|||SPLIT_DOC|||\n\n")
+                    web_docs.extend(lista_ricette_web)
 
     print(
         f" -> [STATO] Estratti {len(rag_docs)} documenti RAG e {len(web_docs)} documenti WEB."
     )
-
-    return {"rag_documents": rag_docs, "web_documents": web_docs}
+    messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state["messages"]]
+    return {
+        "rag_documents": rag_docs,
+        "web_documents": web_docs,
+        "messages": messaggi_da_cancellare,
+    }
 
 
 # --- 3. FUNZIONI DI ROUTING CONDIZIONALE (ROUTER) ---
@@ -66,23 +77,11 @@ def router_pianificazione(state: Blog_Cucina) -> Literal["tools", "estrai_piano"
 
 def estrai_piano_node(state: Blog_Cucina):
     print("\n--- [NODO: ESTRAZIONE PIANO FINALE] ---")
-    messaggi = state.get("messages", [])
+    storico_riflessioni = state.get("reasoning_trace", [])
     feedback = state.get("human_feedback", "")
 
     parti = feedback.split("|")
     piano_salvato = parti[1].replace("piano:", "").strip() if len(parti) > 1 else ""
-
-    storico_riflessioni = []
-
-    for msg in messaggi:
-
-        if getattr(msg, "name", "") == "think_tool":
-
-            testo_pulito = msg.content.replace(
-                "Riflessione registrata con successo: ", ""
-            ).strip()
-            storico_riflessioni.append(testo_pulito)
-
     testo_ragionamenti = "\n".join(storico_riflessioni)
 
     contesto_modifica = ""
@@ -124,10 +123,8 @@ def estrai_piano_node(state: Blog_Cucina):
 
 def estrai_singolo_topic_node(state: Blog_Cucina):
     print("\n--- [NODO: ESTRAZIONE TOPIC / GESTIONE FEEDBACK] ---")
-
-    messaggi = state.get("messages", [])
+    storico_riflessioni = state.get("reasoning_trace", [])
     feedback = state.get("human_feedback", "")
-
     # =================================================================
     # CASO 1: Override Umano
     # =================================================================
@@ -149,13 +146,6 @@ def estrai_singolo_topic_node(state: Blog_Cucina):
             "topic_corrente": risultato.topic,
             "human_feedback": "",
         }
-
-    storico_riflessioni = []
-    for msg in messaggi:
-        if getattr(msg, "name", "") == "think_tool":
-            storico_riflessioni.append(
-                msg.content.replace("Riflessione registrata con successo: ", "").strip()
-            )
 
     testo_ragionamenti = "\n".join(storico_riflessioni)
     is_variante = (
@@ -185,6 +175,7 @@ def estrai_singolo_topic_node(state: Blog_Cucina):
         return {
             "topic_corrente": risultato.topic,
             "reasoning_trace": storico_riflessioni,
+            "richiede_variante": True,
         }
 
     else:
@@ -218,16 +209,7 @@ def router_dopo_estrazione(
 ) -> Literal["human_review_variante", "research"]:
     print("\n--- [ROUTER: CONTROLLO DUPLICATI / HITL] ---")
 
-    messaggi = state.get("messages", [])
-
-    testo_planner = ""
-    for msg in reversed(messaggi):
-        if isinstance(msg, AIMessage) and msg.content:
-            testo_planner = msg.content.lower()
-            break
-
-    # Se il planner ha usato queste parole, significa che ha trovato un duplicato nel DB
-    if "variante" in testo_planner or "bloccato" in testo_planner:
+    if state.get("richiede_variante", False) == True:
         print(
             " -> Rilevato DUPLICATO (Variante proposta). Invio a HUMAN_REVIEW_VARIANTE."
         )
@@ -254,15 +236,17 @@ def router_ricerca(state: Blog_Cucina):
 
 def tool_node(state: Blog_Cucina):
     last_message = state["messages"][-1]
+    nodo_chiamante = state["nodo_chiamante"]
     tool_calls = last_message.tool_calls
     print(f"\n--- [TOOL NODE] Trovate {len(tool_calls)} chiamate a tool ---")
     observations = []
+    ragionamenti_aggiunti = []
+
     for idx, tool_call in enumerate(tool_calls, start=1):
         tool_name = tool_call["name"]
         tool_args = tool_call["args"]
         tool_id = tool_call["id"]
 
-        # STAMPA BASE per i tool normali (opzionale, la teniamo per debug)
         if tool_name != "think_tool":
             print(f"\n[{idx}] Esecuzione tool: {tool_name}")
             print(f"    Argomenti: {tool_args}")
@@ -272,13 +256,11 @@ def tool_node(state: Blog_Cucina):
             msg = f"Errore: tool '{tool_name}' non trovato"
             observations.append(msg)
         else:
-            # Esegui il tool
             result = tool.invoke(tool_args)
             observations.append(result)
 
-            # --- LA NOSTRA STAMPA UNIVERSALE DEI RAGIONAMENTI ---
             if tool_name == "think_tool":
-                # Puliamo il prefisso tecnico per l'utente finale
+                # Puliamo il prefisso tecnico
                 testo_pulito = result.replace(
                     "Riflessione registrata con successo: ", ""
                 ).strip()
@@ -287,8 +269,10 @@ def tool_node(state: Blog_Cucina):
                 print("-" * 60)
                 print(f" {testo_pulito}")
                 print("=" * 60 + "\n")
+                ragionamento = f"[{nodo_chiamante.upper()}] {testo_pulito}"
+                # Aggiungi alla lista dei ragionamenti
+                ragionamenti_aggiunti.append(ragionamento)
 
-    # Costruzione dei messaggi di risposta
     tool_outputs = [
         ToolMessage(
             content=str(obs), name=tool_call["name"], tool_call_id=tool_call["id"]
@@ -296,7 +280,7 @@ def tool_node(state: Blog_Cucina):
         for obs, tool_call in zip(observations, tool_calls)
     ]
 
-    return {"messages": tool_outputs}
+    return {"messages": tool_outputs, "reasoning_trace": ragionamenti_aggiunti}
 
 
 def router_dopo_tools(state: Blog_Cucina) -> str:
@@ -333,12 +317,22 @@ def router_dopo_tools(state: Blog_Cucina) -> str:
 
         else:
             return nodo_chiamante
+
     return nodo_chiamante
 
 
 def check_validation(state: Blog_Cucina):
     """Legge l'esito del validatore strutturato e fa routing."""
-    if state.get("is_valid") == True:
+    messaggi = state.get("messages", [])
+
+    if messaggi:
+        ultimo_messaggio = messaggi[-1]
+
+        if hasattr(ultimo_messaggio, "tool_calls") and ultimo_messaggio.tool_calls:
+            print(" ROUTING: Il validatore sta riflettendo... Vado ai tools.")
+            return "tools"
+
+    if state.get("is_valid", False) == True:
         print("ROUTING: Validazione superata! Procedo alla scrittura della bozza.")
         return "writer"
     else:
@@ -399,6 +393,7 @@ builder.add_conditional_edges(
         "estrai_piano": "estrai_piano",
         "smista_documenti": "smista_documenti",
         "estrai_singolo_topic": "estrai_singolo_topic",
+        "validator": "validator",
     },
 )
 
@@ -425,6 +420,7 @@ builder.add_conditional_edges(
     "validator",
     check_validation,
     {
+        "tools": "tools",
         "writer": "writer",
         "end_block": END,  # Se è falso, interrompe l'esecuzione evitando allucinazioni
     },
