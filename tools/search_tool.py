@@ -1,5 +1,4 @@
 import os
-import json
 import cohere
 from pydantic import BaseModel, Field
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -11,8 +10,7 @@ from langchain_openai import ChatOpenAI
 from graph.schemas import Ingrediente
 
 DOMINI_AFFIDABILI = {
-    "ricette.giallozafferano.it": 5,
-    "blog.giallozafferano.it": 5,
+    "giallozafferano.it": 5,
     "cucchiaio.it": 5,
     "lacucinaitaliana.it": 5,
     "academiabarilla.com": 5,
@@ -20,15 +18,30 @@ DOMINI_AFFIDABILI = {
     "ricette.it": 4,
     "misya.info": 3,
 }
-
+DOMINI_SPAZZATURA = [
+    "wikipedia.org",
+    "tiktok.com",
+    "youtube.com",
+    "youtu.be",
+    "facebook.com",
+    "instagram.com",
+    "pinterest.it",
+    "tripadvisor.it",
+]
 co = cohere.Client(os.getenv("COHERE_API_KEY"))
 
 
 def score_fonte(url: str) -> int:
     from urllib.parse import urlparse
 
-    dominio = urlparse(url).netloc.replace("www.", "")
-    return DOMINI_AFFIDABILI.get(dominio, 2)
+    dominio_estratto = urlparse(url).netloc.lower()
+    dominio_estratto = dominio_estratto.replace("www.", "")
+    for dominio_base, score in DOMINI_AFFIDABILI.items():
+        if dominio_estratto == dominio_base or dominio_estratto.endswith(
+            "." + dominio_base
+        ):
+            return score
+    return 0
 
 
 class ContenutoWebEstratto(BaseModel):
@@ -48,24 +61,18 @@ class ContenutoWebEstratto(BaseModel):
         description="Lista di passaggi numerati, chiari e concisi. Massimo 8 passaggi. Gli ingredienti accessori vanno menzionati qui",
     )
 
-    # Qualità
-    ha_dosi_precise: bool
-    ha_procedimento_completo: bool
-    ha_tempi_cottura: bool
-    ha_numero_persone: bool
-    sembra_tradizionale: bool
-
-    @property
-    def score_contenuto(self) -> int:
-        return sum(
-            [
-                self.ha_dosi_precise,
-                self.ha_procedimento_completo,
-                self.ha_tempi_cottura,
-                self.ha_numero_persone,
-                self.sembra_tradizionale,
-            ]
-        )
+    score_qualita: int = Field(
+        ge=1,
+        le=5,
+        description="""
+        Valuta la qualità complessiva della ricetta da 1 a 5 considerando:
+        - completezza
+        - chiarezza
+        - precisione delle dosi
+        - qualità del procedimento
+        - aderenza alla ricetta tradizionale
+        """,
+    )
 
 
 llm_estrazione = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -75,16 +82,14 @@ estrattore_web = llm_estrazione.with_structured_output(ContenutoWebEstratto)
 def ottimizza_query_ricerca(query_originale: str) -> str:
     prompt = f"""
     Analizza questa query di ricerca culinaria: '{query_originale}'
-    Il tuo compito è trasformarla in una query ottimizzata per motori di ricerca, 
-    focalizzata ESCLUSIVAMENTE sulla preparazione base o sull'ingrediente specifico, 
-    rimuovendo il piatto finale in cui verrà usato.
+    Il tuo compito è trasformarla in una query ottimizzata per motori di ricerca.
 
-    Esempi:
-    - 'Ricetta ragù classico per lasagne' -> 'Ricetta ragù di carne classico bolognese'
-    - 'Besciamella liquida per cannelloni' -> 'Ricetta besciamella dosi procedimento'
-    - 'Pasta frolla friabile per crostata di marmellata' -> 'Ricetta pasta frolla friabile'
-    
-    Rispondi SOLO con la query ottimizzata, senza commenti.
+    === REGOLE DI TRASFORMAZIONE ===
+    1. SE la query indica esplicitamente una base PER un piatto finale (es. 'ragù per lasagne', 'besciamella per cannelloni', 'glassa per torta'), isola la base e rimuovi il piatto finale (es. diventa 'ricetta ragù di carne classico').
+    2. SE INVECE la query è il nome di un piatto completo, un dolce o una torta (es. 'Torta setteveli', 'Carbonara', 'Arancini'), MANTIENI il nome intatto senza rimuovere nulla.
+    3. AGGIUNGI SEMPRE alla fine le parole "ricetta completa in italiano" per forzare i risultati.
+
+    Rispondi SOLO con la query ottimizzata, senza commenti o virgolette.
     """
     return llm_estrazione.invoke(prompt).content
 
@@ -92,12 +97,15 @@ def ottimizza_query_ricerca(query_originale: str) -> str:
 @tool
 def esegui_ricerca_web(query: str) -> str:
     """Cerca, riordina con AI e infine estrae solo le migliori ricette."""
-
-    # 1. Query Optimization
     query_ottimizzata = ottimizza_query_ricerca(query)
-
     # 2. Retrieval iniziale (più ampio: 10 risultati)
-    tool_tavily = TavilySearchResults(max_results=10, language="IT")
+    print(f"\n[Web Tool] Query originale: '{query}'")
+    print(f"[Web Tool] Query ottimizzata: '{query_ottimizzata}'\n")
+    tool_tavily = TavilySearchResults(
+        max_results=10,
+        exclude_domains=DOMINI_SPAZZATURA,
+        country="it",
+    )
     risultati_grezzi = tool_tavily.invoke({"query": query_ottimizzata})
 
     # 3. Re-Ranking con Cohere
@@ -132,23 +140,27 @@ def esegui_ricerca_web(query: str) -> str:
                 ]
             )
 
-            score_totale = score_fonte(url) + dati.score_contenuto
-            ricette_valutate.append((score_totale, url, dati))
+            score_finale = (
+                (rank.relevance_score * 5) + score_fonte(url) + dati.score_qualita
+            )
+            ricette_valutate.append((score_finale, url, dati))
 
         except Exception as e:
             print(f"[Web Tool] Scraping fallito per {url}: {e}")
             continue
 
     # 5. Ordina per score e prendi le 2 migliori
+    print(f"{ricette_valutate}\n")
+    print("QUELLE ORDINATE.")
     ricette_valutate.sort(key=lambda x: x[0], reverse=True)
-    migliori = ricette_valutate[:5]
+    migliori = ricette_valutate[:1]
     print(f"{migliori}")
     # 6. Costruisci output solo con le migliori
     output_list = []
     SEPARATORE = "\n\n|||SPLIT_DOC|||\n\n"
     for score, url, dati in migliori:
         testo_singolo = (
-            f"=== FONTE WEB (score: {score}/10): {url} ===\n"
+            f"=== FONTE WEB (score: {score}/15): {url} ===\n"
             f"{formatta_ricetta_markdown(dati)}\n"
             f"==================="
         )

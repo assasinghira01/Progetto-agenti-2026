@@ -550,50 +550,43 @@ def krag_research_node(state: Blog_Cucina):
 
     testo = f"""
     Sei un Agente Investigatore esperto, specializzato in recupero dati culinari.
-    Il tuo obiettivo corrente è raccogliere dati completi per il topic: '{topic}'.
+    Il tuo obiettivo è raccogliere la ricetta completa per il topic: '{topic}' e TUTTE le sue eventuali sottoricette.
 
-    ### PROTOCOLLO OPERATIVO (OBBLIGATORIO)
-    Il tuo flusso di lavoro deve essere ciclico e atomico. PER OGNI SINGOLA AZIONE che intraprendi, DEVI seguire questo schema rigoroso:
-    
-    1. **PENSIERO (THINK):**  Dopo ogni utilizzo dei tool e prima di intraprendere qualisiasi azione e chiamare qualsiasi tool, devi invocare il 'think_tool' e devi:.
-       - Spiegare quale azione stai per intraprendere.
-       - Spiegare PERCHÉ questa azione è necessaria (es. "Il DB non ha dati, passo al web" o "Ho trovato una sottoricetta, vado a controllare se è presente nel DB").
-       - Se stai eseguendo una combinazione tra una ricetta trova online e una ricetta nel db motiva il perche della sottoricetta.
-       - Concludi SEMPRE la tua riflessione con "STATO: CONTINUO" (se non hai ancora finito) o "STATO: FINITO" (se hai raccolto tutto).
-    
-    2. **FASI DI LAVORO(ACT):** 
-       - Per completare il tuo task, segui RIGOROSAMENTE questo flusso logico:
+    ### L'ALGORITMO DI RICERCA (DA SEGUIRE IN LOOP)
+    Per OGNI elemento che devi cercare (partendo dal topic principale '{topic}', e applicando poi la stessa identica logica a ogni singola sottoricetta che trovi), esegui questa esatta sequenza:
 
-    FASE A: RICERCA PRINCIPALE (Local-First)
-    1. ESTRAZIONE SEMANTICA (KG): La tua primissima azione deve essere invocare il tool `get_ingredienti` per estrarre la conoscenza storica dal Knowledge Graph sul topic '{topic}'.
-    2. RICERCA VETTORIALE (Locale): Invoca il tool `cerca_ricetta_nel_db`. 
-       - Se il KG ti ha fornito dati al punto 1, usali obbligatoriamente per formare la query.
-       - Se il KG ti ha risposto che non ci sono dati, procedi lo stesso formulando tu una query espansa coerente.
-    3. VALUTAZIONE: Valuta i dati ottenuti dal DB locale. Sono SUFFICIENTI solo se possiedi:
-       - Una lista completa di ingredienti con le relative dosi.
-       - Un procedimento chiaro e strutturato.
-    4. BIFORCAZIONE
-       - SE i dati del DB locale sono SUFFICIENTI: Il DB rappresenta la tua Fonte di Verità Assoluta. TI È VIETATO usare la ricerca Web. Passa direttamente alla Fase C.
-       - SE i dati del DB locale sono ASSENTI o INSUFFICIENTI: Sei autorizzato a invocare il tool `esegui_ricerca_web` per recuperare ricette da internet.
-       ATTENZIONE WEB: Se usi il web, il tool ti restituirà più documenti. NON FONDERLI e non cercare di sceglierne uno. Il tuo compito di ricerca principale è concluso, i documenti sono stati messi a sistema. PASSA ALLA FASE B.
+    ▶ PASSO 1: RICERCA LOCALE (DB FIRST)
+    - Usa `get_ingredienti` (per interrogare il Knowledge Graph) e poi `cerca_ricetta_nel_db` cercando il VERO NOME dell'elemento corrente.
+    - VALUTAZIONE: I risultati del DB contengono la ricetta ESATTA e COMPLETA (ingredienti e procedimento)?
+        - SE SÌ (Trovata in DB): Il DB è la Verità Assoluta. TI È VIETATO usare il web per questa ricetta. Salta il Passo 2 e vai direttamente al PASSO 3.
+        - SE NO (Assente o Incompleta): La ricerca locale è fallita. Passa al PASSO 2.
 
-    FASE B: CACCIA ALLE SOTTORICETTE (Cruciale)
-    Leggendo gli ingredienti della ricetta appena trovata (dal DB o dal Web), domandati: 
-    "Questa ricetta richiede una preparazione base complessa?" (es. Maionese per l'insalata russa, Pasta frolla per le crostate,ragu,besciamella,pastelle per i fritti,impasti ecc....).
-    - SE SÌ: Usa IMMEDIATAMENTE  il tool get ingredienti per effetturae la query espansa su `cerca_ricetta_nel_db` per cercare QUELLA specifica sottoricetta. Se non è nel DB, usa `esegui_ricerca_web` per la sottoricetta.
-    - SE NO: Passa alla Fase C.
+    ▶ PASSO 2: IL FILTRO DELLA RETROSPETTIVA (CORTOCIRCUITO O WEB)
+    Se il PASSO 1 ha fallito, ti è SEVERAMENTE VIETATO invocare subito il tool web. Devi prima fare un'analisi della cronologia dei messaggi:
+    - Rileggi attentamente il grande documento web del piatto principale che hai scaricato nei turni precedenti e che si trova poco sopra nella chat.
+    - CONTROLLA SE quel testo contiene già un paragrafo dedicato, le dosi e i passaggi per la sottoricetta corrente (es. se spiega già come fare la glassa o la pasta biscotto).
+        - SE SÌ (Sottoricetta già inclusa): Il Cortocircuito è ATTIVATO. TI È TASSATIVAMENTE VIETATO chiamare `esegui_ricerca_web`. Dichiara nel think_tool: "CORTOCIRCUITO: La sottoricetta di [Nome] è già interamente presente e descritta nel testo principale in memoria." e passa direttamente al PASSO 3.
+        - SE NO (Mancante o solo citata): Il testo in memoria non basta. Allora e solo allora invoca `esegui_ricerca_web` usando come query il nome specifico della sottoricetta corrente. Fatto ciò, passa al PASSO 3.
 
-    FASE C: CONCLUSIONE
-    Quando hai messo a sistema la Ricetta Principale + TUTTE le eventuali Sottoricette necessarie, dichiara "STATO: FINITO".
-    
-    
-    ### REGOLE DI FERRO: I TUOI DIVIETI
-    1. DIVIETO DI FUSIONE: Se trovi 2 ricette web diverse per l'Insalata Russa, NON unire i loro ingredienti. Il tuo lavoro è solo recuperarle, il Validatore sceglierà la migliore.
-    2. DIVIETO DI IGNORARE LE SOTTORICETTE: Non puoi dichiarare "STATO: FINITO" se NON SEI SICURO CHE NON SIANO PIù SOTTORICETTE
-    3. DIVIETO DI OMISSIONE DEL THINK: L'uso del 'think_tool' è obbligatorio ad ogni ciclo.
-    
+    ▶ PASSO 3: GESTIONE SOTTORICETTE E ASTRAZIONE (RICORSIONE)
+    - Leggi attentamente gli ingredienti e il procedimento della ricetta appena acquisita (dal DB, dal Web o tramite cortocircuito).
+    - Cerca eventuali SOTTORICETTE nascoste o esplicite applicando questi due criteri:
+        1. CRITERIO ESPLICITO: Nei documenti del DB, se trovi la dicitura esatta "(vedi preparazione base)", sei sicuro che quella è una sottoricetta.
+        2. CRITERIO DEDUTTIVO (ASTRAZIONE): Nei documenti del WEB e in alcuni casi anche nel DB, identifica la presenza di una sottoricetta deducendola dal procedimento (es. preparazioni complesse come besciamella, maionese, ragù, crema, glassa a specchio, ganache, pasta biscotto ecc..).
+    - SE NE TROVI: 
+        - Astrai il VERO NOME della preparazione (es. se leggi "preparare il ripieno di carne", il vero nome è "Ragù").
+        - Considera questo VERO NOME come un nuovo topic pendente e RIPARTI IMMEDIATAMENTE DAL PASSO 1 per cercarlo (iniziando dal DB locale).
+    - SE NON NE TROVI: La ricerca per questo specifico ramo è conclusa.
+
+    ### REGOLE DI FERRO E DIVIETI (PENA IL FALLIMENTO)
+    1. PENSIERO OBBLIGATORIO: Prima di chiamare qualsiasi tool, chiama il 'think_tool'. Spiega a che punto sei dell'algoritmo. Concludi sempre con "STATO: CONTINUO". Usa "STATO: FINITO" SOLO QUANDO hai risolto l'intera struttura (Ricetta principale + Tutte le sottoricette pendenti).
+    2. DIVIETO DI COMPROMESSO: Non accettare mai risultati parziali. Se cerchi un sugo o una crema e il DB ti dà solo un "soffritto" o un "brodo", la ricerca locale è FALLITA. Devi passare al PASSO 2.
+    3. DIVIETO DI FUSIONE: Se il web restituisce più ricette, NON UNIRLE MAI.
+    4. DIVIETO DI SCRITTURA: Non elencare mai gli ingredienti o i procedimenti nel tuo ragionamento.
+    5. REGOLA ANTI-LOOP: Se una ricerca per una sottoricetta fallisce sia nel DB che sul Web (e non è presente nel monolite), dichiaralo nel think_tool e abbandona quel ramo senza riprovare all'infinito.
+    6. ASSOLUTO DIVIETO DI AMNESIA (CRITICO): Quando ti sposti su una sottoricetta, non ignorare i messaggi passati della chat. Il testo della ricetta principale è ancora lì. Rileggilo sempre al PASSO 2 per vedere se contiene già la soluzione, evitando di fare ricerche web ridondanti.
     ### STATO ATTUALE
-    Sei pronto ad agire. Inizia invocando il 'think_tool' per pianificare la prima mossa su '{topic}'.
+    Sei pronto ad agire. Inizia invocando il 'think_tool' per pianificare la prima mossa sul topic principale: '{topic}'.
     """
 
     prompt = SystemMessage(content=testo)
@@ -635,16 +628,11 @@ def krag_research_node(state: Blog_Cucina):
 def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
     topic = state["topic_corrente"]
+    tracce_di_ragionamento = state.get("reasoning_trace", [])
     dati_db_locale = state.get("rag_documents", [])
     dati_web_grezzi = state.get("web_documents", [])
     messaggi = state.get("messages", [])
-
-    print("RAG DOCUMENTS:")
-    print(len(dati_db_locale))
-
-    for i, doc in enumerate(dati_db_locale):
-        print(f"DOC {i}")
-        print(doc[:200])
+    totale_doc = len(dati_db_locale) + len(dati_web_grezzi)
 
     testo_db = "NESSUNA RICETTA TROVATA NEL DB LOCALE"
     if dati_db_locale:
@@ -663,25 +651,36 @@ def validator_node(state: Blog_Cucina):
     if not messaggi:
 
         prompt_riflessione = f"""
-        Sei un validatore esperto di ricettari. Il tuo compito è analizzare i documenti recuperati per il topic: '{topic}'.
+        Sei un validatore esperto di ricettari e un risolutore di dipendenze. 
+        Ti sono stati forniti ESATTAMENTE {totale_doc} documenti in totale (tra DB locale e WEB).
 
-        === ISTRUZIONI DI VALUTAZIONE ===
-        Per OGNI documento (DB e WEB) devi eseguire questi 3 passaggi obbligatori nel tuo ragionamento (think_tool):
-        1. Estrai il TITOLO REALE dalla prima riga del documento.
-        2. Confronta il titolo con il topic '{topic}'.
-        3. Assegna uno SCORE rigoroso basandoti su queste regole:
+        === L'ALGORITMO DI VALIDAZIONE (DA SEGUIRE PASSO PASSO) ===
+        Nel tuo ragionamento ('think_tool'), devi eseguire RIGOROSAMENTE queste 3 fasi in ordine cronologico:
 
-        === REGOLE DI SCORING ===
-        - SCORE 1 (FONDAMENTALE): È la ricetta precisa del topic '{topic}' O la sua sottoricetta indispensabile (es. Besciamella per Cannelloni).
-        - SCORE 0 (IRRILEVANTE): Qualsiasi documento che parla di un piatto diverso (es una variante) o che non c'entra nulla.
-        === REGOLA D'ORO PER IL WEB (DEDUPLICAZIONE) ===
-        Ti sono stati forniti documenti da DB e WEB. 
-        - Se trovi due o più documenti che trattano la STESSA ricetta (es. due ricette di 'Cannelloni Ricotta e Spinaci'):
-        1. Confronta la loro qualità (punteggio della fonte).
-        2. Assegna SCORE 1 SOLO AL MIGLIORE.
-        3. Assegna SCORE 0 A TUTTI GLI ALTRI (anche se sono buoni, per evitare ridondanze).
-        - NON inviare al Writer più di una fonte per la stessa ricetta o sottoricetta.
-         
+        ▶ FASE 1: ELEZIONE DELLA RICETTA PRINCIPALE
+        - Cerca tra i documenti tutti quelli che descrivono il topic principale: '{topic}'.
+        - Se trovi più versioni per '{topic}', confronta i loro punteggi (score web) o l'autorevolezza.
+        - Eleggi la versione MIGLIORE IN ASSOLUTO. Questa diventa la "Ricetta Madre".
+        - Assegna SCORE 1 alla Ricetta Madre.
+        - Assegna SCORE 0 a tutte le altre versioni scartate (duplicati inferiori).
+
+        ▶ FASE 2: ANALISI DELLE DIPENDENZE
+        - Leggi attentamente gli ingredienti e il procedimento ESCLUSIVAMENTE della "Ricetta Madre" 
+            appena eletta e i tuoi vecchi ragionamenti '{tracce_di_ragionamento}' per TROVARE ed ESTRARRE le sue eventuali SOTTORICETTE.
+        - Dichiara chiaramente quali sono le sottoricette richieste per questa specifica preparazione.
+
+        ▶ FASE 3: VALIDAZIONE A CASCATA (FILTRO SOTTORICETTE)
+        - Ora valuta tutti i restanti documenti.
+        - SE un documento descrive una Sottoricetta Necessaria (individuata nella Fase 2):
+            - Se è unica, assegnale SCORE 1.
+            - Se ci sono più versioni della stessa sottoricetta, eleggi la migliore (assegnando SCORE 1 alla vincitrice e SCORE 0 ai duplicati).
+        - SE un documento descrive un piatto irrilevante OPPURE una sottoricetta NON richiesta dalla Ricetta Madre (es. il documento descrive un "Brodo", ma la Ricetta Madre eletta non usa brodo): assegna TASSATIVAMENTE SCORE 0.
+
+        === FORMATO OUTPUT OBBLIGATORIO NEL RAGIONAMENTO ===
+        Il tuo ragionamento finale DEVE contenere ESATTAMENTE {totale_doc} righe di valutazione. Non saltare o accorpare nessun documento.
+        Per ogni documento scrivi esattamente così:
+        - ID_DOC [TITOLO ESTRATTO]: Score X - Motivo: ... (es. "Eletta come Ricetta Madre", "Sottoricetta necessaria per la Ricetta Madre", "Scartata perché duplicato inferiore", "Scartata perché non richiesta dalla Ricetta Madre").
+
         === DOCUMENTI DA VALUTARE ===
         [DB LOCALE]
         {testo_db}
@@ -689,17 +688,9 @@ def validator_node(state: Blog_Cucina):
         [WEB]
         {testo_web}
 
-        === FORMATO OUTPUT OBBLIGATORIO NEL RAGIONAMENTO ===
-        Per ogni documento scrivi esattamente così:
-        - ID_DOC [TITOLO ESTRATTO]: Score X - Motivo: ...
-        Esempio: - DB_DOC_0 [Pasta alla Norma]: Score 0 - Parla di Norma, non di Cannelloni.
-
-        Se il contenuto non corrisponde al topic o a una sottoricetta necessaria, il voto deve essere 0. 
-        NON inventare correlazioni. Se il documento non è pertinente, assegna 0.
-
         Concludi con:
         STATO: FINITO
-"""
+        """
         messaggio = [
             SystemMessage(content=prompt_riflessione),
             HumanMessage(content=f"Analizza i documenti per '{topic}'."),
@@ -749,7 +740,7 @@ Produci il verdetto strutturato per '{topic}'.
 
         for d in db_ordinato:
 
-            if d.score == 2:
+            if d.score == 1:
 
                 dati_db_filtrati.append(dati_db_locale[d.id])
 
@@ -768,7 +759,7 @@ Produci il verdetto strutturato per '{topic}'.
 
         for d in web_ordinato:
 
-            if d.score == 2:
+            if d.score == 1:
 
                 dati_web_filtrati.append(dati_web_grezzi[d.id])
 
