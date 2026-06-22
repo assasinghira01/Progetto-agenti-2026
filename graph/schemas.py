@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Literal, Optional
 
 
@@ -44,9 +44,12 @@ class ValidationResult(BaseModel):
 
 class Ingrediente(BaseModel):
     nome: str = Field(
-        description="Nome dell'ingrediente. REGOLA DI NORMALIZZAZIONE: Usare il singolare e rimuovere aggettivi inutili e frasi superflue. "
-        "(es. 'Uova fresche' -> 'Uovo', 'Pomodorini biologici' -> 'Pomodorino', 'Besciamella classica' -> 'Besciamella', 'ragù fatto in casa' -> 'Ragù'). "
-        "MANTIENI invece la tipologia fondamentale se cambia l'ingrediente (es. 'Farina 00', 'Carne macinata di maiale')."
+        description="Nome dell'ingrediente con la PRIMA LETTERA MAIUSCOLA. "
+        "REGOLE DI NORMALIZZAZIONE: "
+        "1. PLURALE per elementi contabili (es. 'Carota' -> 'Carote', 'Pisello' -> 'Piselli', 'Uovo' -> 'Uova'). "
+        "2. SINGOLARE per masse, liquidi o elementi non contabili (es. 'Sedano', 'Latte', 'Farina', 'Burro'). "
+        "3. RIMUOVI frasi superflue, imballaggi o stati fisici ovvi (es. 'Cacao amaro in polvere' -> 'Cacao amaro', 'Pomodori in scatola' -> 'Pomodori', 'Ragù fatto in casa' -> 'Ragù'). "
+        "4. MANTIENI le specificità fondamentali della ricetta (es. 'Ragù alla bolognese', 'Cioccolato fondente', 'Farina 00')."
     )
     quantita: str = Field(description="Quantità completa (es. '300g')")
     fase_utilizzo: str = Field(
@@ -60,46 +63,62 @@ class Ingrediente(BaseModel):
         "Se l'ingrediente costituisce la massa principale del piatto e non rientra in queste categorie, scrivi 'Base'."
     )
 
+    # Questo validatore forza via codice la prima lettera maiuscola
+    @field_validator("nome")
+    @classmethod
+    def capitalizza_nome(cls, v: str) -> str:
+        if v:
+            # Capitalizza solo la prima lettera lasciando intatto il resto (es. "Ragù alla bolognese")
+            return v[0].upper() + v[1:]
+        return v
+
 
 class SottoRicetta(BaseModel):
     nome_specifico: str = Field(
-        description="Il nome esatto usato nella ricetta (es. 'Ragù della nonna', 'La nostra besciamella')."
+        description="Il nome esatto usato nella ricetta, con la PRIMA LETTERA MAIUSCOLA (es. 'Ragù alla bolognese', 'La nostra besciamella')."
     )
     classe_astratta: str = Field(
-        description="La radice ontologica pulita della preparazione. "
-        "REGOLA DI NORMALIZZAZIONE: Rimuovi aggettivi generici, di origine o di qualità (es. 'Besciamella classica' -> 'Besciamella', "
-        "'Ragù bolognese' -> 'Ragù'). "
-        "ECCEZIONE TASSATIVA SULLE VARIANTI: Se il nome contiene modifiche strutturali, dietetiche o ingredienti alternativi "
-        "(es. 'Besciamella senza burro', 'Crema vegana', 'Ragù di pesce', 'Maionese senza uova'), "
-        "la classe astratta DEVE mantenere questa specifica per intero (es. 'Besciamella senza burro'). Non semplificarla."
+        description="La radice ontologica pulita, con la PRIMA LETTERA MAIUSCOLA (es. 'Besciamella', 'Ragù'). "
+        "ECCEZIONE TASSATIVA SULLE VARIANTI: Mantieni la specifica se cambia la struttura (es. 'Besciamella senza burro', 'Ragù di pesce')."
     )
     ingredienti: list[Ingrediente] = Field(
         description="Tutti e soli gli ingredienti necessari per questa specifica preparazione."
     )
 
+    @field_validator("nome_specifico", "classe_astratta")
+    @classmethod
+    def capitalizza_sottoricetta(cls, v: str) -> str:
+        if v:
+            return v[0].upper() + v[1:]
+        return v
+
 
 class RecipeDraft(BaseModel):
-    titolo: str = Field(description="Titolo accattivante per il post")
-    introduzione: str = Field(description="Breve introduzione discorsiva")
+    titolo: str = Field(
+        description="Titolo accattivante per il post, con la PRIMA LETTERA MAIUSCOLA (es. 'Lasagne alla bolognese')."
+    )
+    introduzione: str = Field(
+        description="Breve introduzione discorsiva (max 30 parole)"
+    )
     sotto_ricette: list[SottoRicetta] = Field(
-        description="Eventuali preparazioni secondarie e indipendenticon i loro ingredienti esclusivi."
-        "La fonte nella maggior parte dei casi, specificherà se ci saranno o meno delle preparazioni secondarie. "
-        "Se non sono presenti, dovrai essere in grado di identificare autonomamente se è necessario creare una sotto-ricetta (es. ragù, besciamella, maionese, pastella, guarnizioni ecc...) o se tutti gli ingredienti"
-        "e la preparazione possono essere inseriti direttamente nella ricetta principale."
-        "REGOLA SUI PRODOTTI PRONTI: Crea una sotto-ricetta SOLO SE la fonte elenca gli ingredienti crudi per prepararla da zero (es. burro, farina e latte per la besciamella). "
-        "Se la fonte utilizza un prodotto industriale già pronto (es. '500ml di besciamella pronta', '1 vasetto di pesto', 'Pasta sfoglia comprata'), "
-        "NON creare la sotto-ricetta, ma inserisci il prodotto finito direttamente tra gli 'ingredienti_diretti'."
-        "REGOLA SUI CONDIMENTI/TOPPING: NON creare MAI una sotto-ricetta per semplici raggruppamenti di ingredienti crudi o pronti da disporre su un piatto (es. 'Per condire', 'Topping', 'Per guarnire', 'Per la farcitura',ecc..). "
-        "Ingredienti base, DEVONO andare negli 'ingredienti_diretti', anche se la fonte web li raggruppa sotto un titolo separato. "
-        "Una sotto-ricetta (es. Biga, Impasto, Ragù, Crema, ecc...) implica una trasformazione o cottura congiunta degli ingredienti."
+        description="Eventuali preparazioni secondarie che richiedono trasformazione o cottura (es. Ragù, Besciamella, Creme). "
+        "NON creare sottoricette per condimenti a crudo o prodotti industriali pronti."
     )
     ingredienti_diretti: list[Ingrediente] = Field(
-        description="Ingredienti principali che compongono DIRETTAMENTE il piatto. "
-        "REGOLA TASSATIVA DI MUTUA ESCLUSIVITÀ: Gli ingredienti inseriti qui NON DEVONO comparire"
-        "all'interno di nessuna 'sotto_ricetta', nel caso in cui trovi degli ingredienti duplicati inseriscili solo nel contesto corretto."
-        "Le duplicazioni di ingredienti tra ingredienti_diretti e sotto_ricette sono un errore logico che indica una confusione tra preparazione principale e secondaria. "
-        " Se un ingrediente appartiene al ragù, mettilo SOLO "
-        "nella sotto-ricetta del ragù ed escludilo totalmente da questa lista."
+        description="Ingredienti principali che compongono DIRETTAMENTE la Ricetta Madre (escludendo quelli che appartengono alle sottoricette)."
     )
-    preparazione: str = Field(description="Testo discorsivo del procedimento")
-    fonte: str = Field(description="L'URL della fonte da cui è tratta la ricetta")
+    preparazione: list[str] = Field(
+        description="Elenco esteso e dettagliato di tutti i passaggi della ricetta. Ogni passaggio logico deve essere una stringa separata nella lista. È severamente vietato riassumere."
+    )
+
+    # [MODIFICA QUI] Da stringa singola a lista di stringhe
+    fonti: list[str] = Field(
+        description="Elenco di TUTTI gli URL o i percorsi dei file usati per scrivere questo post (Ricetta Madre e tutte le Sottoricette). Inserisci ogni fonte in una stringa separata della lista."
+    )
+
+    @field_validator("titolo")
+    @classmethod
+    def capitalizza_titolo(cls, v: str) -> str:
+        if v:
+            return v[0].upper() + v[1:]
+        return v

@@ -556,23 +556,23 @@ def krag_research_node(state: Blog_Cucina):
     Per OGNI elemento che devi cercare (partendo dal topic principale '{topic}', e applicando poi la stessa identica logica a ogni singola sottoricetta che trovi), esegui questa esatta sequenza:
 
     ▶ PASSO 1: RICERCA LOCALE (DB FIRST)
-    - Usa `get_ingredienti` (per interrogare il Knowledge Graph) e poi `cerca_ricetta_nel_db` cercando il VERO NOME dell'elemento corrente.
+    - Usa `get_ingredienti_per_variante` (per interrogare il Knowledge Graph) e poi `cerca_ricetta_nel_db` cercando il VERO NOME dell'elemento corrente.
     - VALUTAZIONE: I risultati del DB contengono la ricetta ESATTA e COMPLETA (ingredienti e procedimento)?
         - SE SÌ (Trovata in DB): Il DB è la Verità Assoluta. TI È VIETATO usare il web per questa ricetta. Salta il Passo 2 e vai direttamente al PASSO 3.
         - SE NO (Assente o Incompleta): La ricerca locale è fallita. Passa al PASSO 2.
 
     ▶ PASSO 2: IL FILTRO DELLA RETROSPETTIVA (CORTOCIRCUITO O WEB)
-    Se il PASSO 1 ha fallito, ti è SEVERAMENTE VIETATO invocare subito il tool web. Devi prima fare un'analisi della cronologia dei messaggi:
-    - Rileggi attentamente il grande documento web del piatto principale che hai scaricato nei turni precedenti e che si trova poco sopra nella chat.
-    - CONTROLLA SE quel testo contiene già un paragrafo dedicato, le dosi e i passaggi per la sottoricetta corrente (es. se spiega già come fare la glassa o la pasta biscotto).
-        - SE SÌ (Sottoricetta già inclusa): Il Cortocircuito è ATTIVATO. TI È TASSATIVAMENTE VIETATO chiamare `esegui_ricerca_web`. Dichiara nel think_tool: "CORTOCIRCUITO: La sottoricetta di [Nome] è già interamente presente e descritta nel testo principale in memoria." e passa direttamente al PASSO 3.
-        - SE NO (Mancante o solo citata): Il testo in memoria non basta. Allora e solo allora invoca `esegui_ricerca_web` usando come query il nome specifico della sottoricetta corrente. Fatto ciò, passa al PASSO 3.
+    Se il PASSO 1 ha fallito, ti è SEVERAMENTE VIETATO invocare subito il tool 'esegui_ricerca_web'.
+    - Rileggi e controlla attentamente il documento della Ricetta Principale che hai ricevuto precedentemente.
+    - Contiene già gli ingredienti , le dosi e il procedimento per la sottoricetta corrente (es. se spiega già come fare la glassa o la pasta biscotto)?
+        - SE SÌ (Sottoricetta già inclusa): Il Cortocircuito è ATTIVATO. TI È TASSATIVAMENTE VIETATO chiamare `esegui_ricerca_web`. Utilizza il 'think_tool' e dichiara: "CORTOCIRCUITO: La sottoricetta di [Nome] è già interamente presente e descritta nel testo principale in memoria." e PASSA DIRETTAMENTE al PASSO 3.
+        - SE NO (Mancante o solo citata): Solo adesso SEI AUTORIZZATO ad invocare `esegui_ricerca_web` usando come query il nome specifico della sottoricetta corrente. Fatto ciò, PASSA al PASSO 3.
 
     ▶ PASSO 3: GESTIONE SOTTORICETTE E ASTRAZIONE (RICORSIONE)
     - Leggi attentamente gli ingredienti e il procedimento della ricetta appena acquisita (dal DB, dal Web o tramite cortocircuito).
     - Cerca eventuali SOTTORICETTE nascoste o esplicite applicando questi due criteri:
         1. CRITERIO ESPLICITO: Nei documenti del DB, se trovi la dicitura esatta "(vedi preparazione base)", sei sicuro che quella è una sottoricetta.
-        2. CRITERIO DEDUTTIVO (ASTRAZIONE): Nei documenti del WEB e in alcuni casi anche nel DB, identifica la presenza di una sottoricetta deducendola dal procedimento (es. preparazioni complesse come besciamella, maionese, ragù, crema, glassa a specchio, ganache, pasta biscotto ecc..).
+        2. CRITERIO DEDUTTIVO (ASTRAZIONE): Nei documenti del WEB e in alcuni casi anche nel DB, identifica la presenza di una sottoricetta deducendola dal procedimento (es. preparazioni complesse come besciamella,pastella, maionese, ragù, crema, glassa a specchio,glassa, ganache, pasta biscotto ecc..).
     - SE NE TROVI: 
         - Astrai il VERO NOME della preparazione (es. se leggi "preparare il ripieno di carne", il vero nome è "Ragù").
         - Considera questo VERO NOME come un nuovo topic pendente e RIPARTI IMMEDIATAMENTE DAL PASSO 1 per cercarlo (iniziando dal DB locale).
@@ -710,15 +710,16 @@ def validator_node(state: Blog_Cucina):
             break
 
     prompt_verdetto = f"""
-Sulla base di questa tua analisi:
-{riflessione_testo}
+    Sulla base di questa tua analisi logica:
+    {riflessione_testo}
 
-Produci il verdetto strutturato per '{topic}'.
-- documenti_db_approvati: indici DB_DOC utili (es. [0, 1])
-- documenti_web_approvati: UN solo indice WEB_DOC (il migliore)
-- is_valid: True se i dati sono sufficienti per scrivere l'articolo
-- usa_db_locale: True se almeno un DB_DOC è stato approvato
-"""
+    Produci il verdetto strutturato per '{topic}'.
+    ATTENZIONE (CRITICO): Devi estrarre e mappare TUTTI i documenti a cui hai assegnato SCORE 1 nella tua analisi.
+    Puoi (e DEVI) approvare UNO O PIÙ  documenti (sia DB che Web) se uno rappresenta la Ricetta Madre e gli altri sono le Sottoricette necessarie.
+    Nel caso in cui nessun documento riceva score 1 , i dati sono tutti inconsistenti per scrivere il post.
+    - is_valid: True se i dati totali approvati sono sufficienti per scrivere il post.
+    - usa_db_locale: True se almeno un documento del DB è stato approvato (Score 1).
+    """
     esito = llm.with_structured_output(ValidationResult).invoke(
         [HumanMessage(content=prompt_verdetto)]
     )
@@ -773,138 +774,143 @@ Produci il verdetto strutturato per '{topic}'.
     }
 
 
+# MARKDOWN PER LA BOZZA
+def genera_markdown_bozza(draft) -> str:
+    """Trasforma il Pydantic RecipeDraft in un post Markdown pulito e scansionabile."""
+
+    md = f"# {draft.titolo}\n\n"
+    md += f"## Introduzione\n{draft.introduzione}\n\n"
+
+    md += "## Ingredienti Principali\n"
+    if draft.ingredienti_diretti:
+        for ing in draft.ingredienti_diretti:
+            md += f"- **{ing.nome}**: {ing.quantita}\n"
+    else:
+        md += "- *Nessun ingrediente diretto aggiuntivo.*\n"
+
+    if draft.sotto_ricette:
+        md += "\n## Sottoricette Necessarie\n"
+        for sub in draft.sotto_ricette:
+            # [MODIFICA QUI] Stampa SOLO la classe astratta pulita (es. "Maionese" invece di "Maionese Fatta in Casa")
+            md += f"\n### {sub.classe_astratta}\n"
+            for ing in sub.ingredienti:
+                md += f"- **{ing.nome}**: {ing.quantita}\n"
+
+    md += "\n## Preparazione Passo-Passo\n"
+    if draft.preparazione:
+        for i, step in enumerate(draft.preparazione, start=1):
+            md += f"{i}. {step}\n"
+    else:
+        md += "1. *Nessun passaggio specificato.*\n"
+
+    # [MODIFICA QUI] Cicla su tutte le fonti raccolte e crea un elenco puntato
+    md += f"\n---\n**Fonti Utilizzate**:\n"
+    if hasattr(draft, "fonti") and draft.fonti:
+        for f in draft.fonti:
+            md += f"- {f}\n"
+    else:
+        md += "- *Fonte sconosciuta*\n"
+
+    return md
+
+
 # writer node: sintetizza le informazioni approvate e scrivi la bozza del post in markdown, con attenzione alla distinzione tra ingredienti diretti e sotto-ricette, e alla gerarchia degli ingredienti. Applica eventuali feedback umani ricevuti per correggere o migliorare la bozza prima di generare il markdown finale.
-def writer_node(state: Blog_Cucina):
-    print("\n--- [NODO 4: WRITER (Sintesi e Grounding)] ---")
+
+
+def writer_node(state):
+    print("\n--- [NODO 4: WRITER (Sintesi, Grounding e Coesione)] ---")
     topic = state["topic_corrente"]
     dati_db_locale = state.get("approved_db_documents", [])
     dati_web = state.get("approved_web_documents", [])
-    testo_db = "\n".join(dati_db_locale) if dati_db_locale else "NESSUN DATO IN LOCALE"
-    testo_web = "\n".join(dati_web) if dati_web else "NESSUN DATO DAL WEB"
-    feedback = state.get("human_feedback")
+    feedback = state.get("human_feedback", "")
 
-    print(f"datiweb: {testo_web}")
-    print(f"datilocale: {testo_db}")
+    # Sfruttiamo il tuo reducer (operator.add) che ha già accumulato i pensieri
+    lista_tracce = state.get("reasoning_trace", [])
+
+    if lista_tracce:
+        traces_formattate = "\n".join([f"- {t}" for t in lista_tracce])
+    else:
+        traces_formattate = "Nessuna traccia di ragionamento precedente registrata."
+
+    # Consolidiamo i testi delle fonti approvate dal Validatore
+    testi_approvati = "\n\n".join(dati_db_locale + dati_web)
+    if not testi_approvati.strip():
+        testi_approvati = "ERRORE: Nessun documento approvato dal Validatore."
+
     istruzione_correzione = (
-        f"""
-
-FEEDBACK REDATTORE:
-
-{feedback}
-
-Applica queste modifiche.
-"""
+        f"\n MODIFICHE PRIORITARIE RICHIESTE DAL REDATTORE:\n{feedback}\n"
         if feedback
         else ""
     )
 
     prompt = f"""
-Sei un food blogger professionista.
+    Sei un Food Blogger professionista e un Redattore Editoriale senior.
+    Il tuo compito è scrivere la bozza finale strutturata per l'articolo: '{topic}' (definita come RICETTA MADRE).
 
-ARGOMENTO:
-{topic}
+    Per farlo, ti vengono forniti due asset fondamentali che costituiscono il tuo unico perimetro di verità:
+    1. I TESTI APPROVATI: I documenti testuali contenenti la ricetta madre e le sottoricette.
+    2. LE TRACCE DI RAGIONAMENTO: L'analisi logica che mostra come il sistema ha scomposto il piatto e risolto le dipendenze.
 
-Devi produrre una ricetta strutturata.
+    ========================================================================
+    CRITERI DI COMPILAZIONE TASSATIVI (ZERO ALLUCINAZIONI)
+    ========================================================================
+    1. RIGORE STRUTTURALE (COESIONE RICETTA -> SOTTORICETTE):
+       - Il tuo output deve rispecchiare fedelmente l'albero delle dipendenze stabilito nelle tracce di ragionamento.
+       - Se il ragionamento precedente indica che un ingrediente (es. Besciamella, Ragù) è una SOTTORICETTA autonoma da sviluppare, DEVI mapparla interamente nella lista delle 'sotto_ricette', estraendo i suoi ingredienti specifici dal testo della fonte.
+       - È SEVERAMENTE VIETATO lasciare una sottoricetta complessa descritta come semplice stringa piatta negli ingredienti diretti della ricetta madre.
 
-REGOLE IMPORTANTI:
+    2. VINCOLO DI ANCHORING METRICOTESTUALE:
+       - Estrai dosi, pesi, ingredienti e passaggi ESCLUSIVAMENTE dai testi approvati forniti. 
+       - Non inventare ingredienti accessori, non arrotondare le dosi e non inserire passaggi non scritti nei documenti.
+       - Se un ingrediente manca di quantità nel testo, scrivi "q.b." o "quantità non specificata" come da fonte.
 
-- Non inventare ingredienti.
-- Non inventare quantità.
-- Non inventare preparazioni.
-- Usa solo le informazioni presenti nelle fonti.
-- INGREDIENTI: Estrai le dosi ESCLUSIVAMENTE dal testo della fonte selezionata.
- È severamente vietato unire le dosi di due siti diversi o inventarle. 
-Rispetta la divisione gerarchica tra ingredienti diretti e sotto-ricette.
+    3. REGOLA ANTI-SOPRASTRUTTURE PER CONDIMENTI:
+       - Non creare oggetti SottoRicetta per ingredienti pronti o topping che non subiscono una trasformazione termica o meccanica congiunta (es. parmigiano grattugiato da spolverare, prosciutto pronto). Questi vanno inseriti negli ingredienti diretti.
 
+    4. DETTAGLIO DELLA PREPARAZIONE:
+       - Genera l'elenco dei passaggi ('preparazione') in modo esteso, analitico e sequenziale. Non riassumere i procedimenti complessi in un solo paragrafo. Ogni passaggio deve essere una stringa chiara e indipendente nella lista.
+    {istruzione_correzione}
+    
+    ========================================================================
+    CONTESTO E FONTI PER LA COMPILAZIONE
+    ========================================================================
+    
+    [TRACCE DI RAGIONAMENTO PRECEDENTE (LOG DEL GRAPH STATE)]
+    {traces_formattate}
 
-SOTTORICETTE:
-Se individui preparazioni autonome (es. Ragù, Besciamella, Crema pasticcera, Ganache, Pastella)
-NON inserirle negli ingredienti diretti.
-Crea invece una SottoRicetta con:
-- nome_specifico
-- classe_astratta
-- ingredienti
-Esempio:
-nome_specifico = "Ragù per arancini"
-classe_astratta = "Ragù"
-ingredienti = [...]
-REGOLA TASSATIVA ANTI-TOPPING E CONDIMENTI 
-È severamente VIETATO creare una SottoRicetta per raggruppamenti di ingredienti crudi o pronti che devono solo essere posizionati sopra il piatto.
-Se la fonte ha un titolo come "PER CONDIRE", "TOPPING", "PER GUARNIRE", "FARCITURA" (es. pomodoro, mozzarella, prosciutto su una pizza, o verdure in un'insalata):
-1. DEVI IGNORARE QUEL TITOLO.
-2. NON CREARE ALCUNA SOTTORICETTA.
-3. Prendi tutti quegli ingredienti e inseriscili nella lista degli INGREDIENTI DIRETTI, assegnando loro la fase_utilizzo "Condimento" o "Guarnizione"
+    [TESTI DELLE FONTI APPROVATE (RICETTA MADRE + SOTTORICETTE)]
+    {testi_approvati}
+    """
 
-INGREDIENTI DIRETTI:
-Inserisci qui soltanto gli ingredienti che appartengono direttamente alla ricetta principale.
-Esempio:
-Arancini:
-- Riso
-- Burro
-- Zafferano
-
-INTRODUZIONE:
-max 30 parole.
-PREPARAZIONE:
-max 100 parole.
-
-{istruzione_correzione}
-
-FONTI:
-
-=== DB LOCALE ===
-{testo_db}
-
-=== WEB ===
-{testo_web}
-"""
-
+    # 3. Chiamata LLM Strutturata (Pydantic)
     llm_writer = llm.with_structured_output(RecipeDraft)
     draft = llm_writer.invoke([HumanMessage(content=prompt)])
-    # =======================================================
-    # PULIZIA DATI "ANTI-MATRIOSKA" (Prima di generare il Markdown)
-    # =======================================================
-    sottoricette_pulite = []
-    ingredienti_da_spostare = []
-    for sub in draft.sotto_ricette:
-        if not sub.ingredienti:
-            continue
-        if len(sub.ingredienti) == 1:
-            ing_nome = sub.ingredienti[0].nome.lower()
-            sub_nome = sub.classe_astratta.lower()
-            # Se la preparazione contiene se stessa come ingrediente
-            if sub_nome in ing_nome or ing_nome in sub_nome:
-                # Spostiamo l'ingrediente finito nella lista dei diretti
-                ingredienti_da_spostare.append(sub.ingredienti[0])
-                continue  # Ignora la sottoricetta
 
-        # Se passa i controlli, la conserviamo
-        sottoricette_pulite.append(sub)
-    # Aggiorniamo l'oggetto draft originale con i dati puliti
-    draft.sotto_ricette = sottoricette_pulite
-    draft.ingredienti_diretti.extend(ingredienti_da_spostare)
-    # =======================================================
+    # 3. MIDDLEWARE DI PULIZIA PYTHON (DEDUPLICAZIONE LOGICA BINDING)
+    nomi_sottoricette = set()
+    for sub in draft.sotto_ricette:
+        nomi_sottoricette.add(sub.classe_astratta.lower())
+        nomi_sottoricette.add(sub.nome_specifico.lower())
+
+    ingredienti_diretti_puliti = []
+    for ing in draft.ingredienti_diretti:
+        ing_nome_basso = ing.nome.lower()
+        is_subrecipe = any(nome_sub in ing_nome_basso for nome_sub in nomi_sottoricette)
+        if not is_subrecipe:
+            ingredienti_diretti_puliti.append(ing)
+
+    draft.ingredienti_diretti = ingredienti_diretti_puliti
+
     print("\n===== DEBUG WRITER =====")
     print(draft.model_dump())
     print("========================\n")
-    markdown = f"# {draft.titolo}\n\n"
-    markdown += "## Introduzione\n\n"
-    markdown += draft.introduzione + "\n\n"
-    markdown += "## Ingredienti Principali\n\n"
-    for ing in draft.ingredienti_diretti:
-        markdown += f"- {ing.nome}: " f"{ing.quantita}\n"
-    if draft.sotto_ricette:
-        markdown += "\n"
-        for sub in draft.sotto_ricette:
-            markdown += f"### {sub.nome_specifico}\n\n"
-            for ing in sub.ingredienti:
-                markdown += f"- {ing.nome}: " f"{ing.quantita}\n"
-            markdown += "\n"
-    markdown += "\n## Preparazione\n\n" f"{draft.preparazione}\n\n"
-    markdown += "## Fonte\n\n" f"{draft.fonte}"
+
+    # 4. Generazione Markdown deterministica tramite la funzione esterna
+    markdown_finale = genera_markdown_bozza(draft)
+
     return {
         "recipe_draft": draft,
-        "post_draft": markdown,
+        "post_draft": markdown_finale,
     }
 
 

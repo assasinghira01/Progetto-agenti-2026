@@ -31,14 +31,14 @@ def think_tool(reflection: str) -> str:
 
     * Usa "STATO: CONTINUO" se ti trovi in ALMENO UNO di questi scenari:
       - Stai attualmente eseguendo il PASSO 1 (DB locale) o il PASSO 2 (Web) per il topic principale o per una qualsiasi sottoricetta.
-      - Una ricerca ha fallito e devi ottimizzare la query per effettuare un nuovo tentativo.
-      - Hai rilevato una sottoricetta complessa che manca nel DB locale E hai accertato che il documento web corrente NON la spiega in modo esaustivo (dosi o procedimento mancanti), richiedendo quindi una ricerca web dedicata.
+      - Il DB ha fallito e DEVI usare questo 'think_tool' per dichiarare l'esito del CORTOCIRCUITO (cioè verificare se la sottoricetta è già descritta nel testo in memoria).
+      - Il Cortocircuito ha dato esito negativo e devi quindi procedere con la ricerca web dedicata.
 
     * Usa "STATO: FINITO" SOLO E RIGOROSAMENTE se hai soddisfatto TUTTI questi requisiti:
       - 1. Hai recuperato con successo i dati per il topic principale.
       - 2. Hai analizzato ogni singola sottoricetta emersa e l'hai dichiarata "RISOLTA" applicando correttamente i criteri:
            - È presente nella nostra versione ufficiale nel DB locale, OPPURE
-           - Il DB ha fallito, ma il documento web corrente la spiega già in modo completo con dosi e procedimento ("Tutto-in-uno"), OPPURE
+           - Il DB ha fallito, ma il documento web corrente la spiega già in modo completo (CORTOCIRCUITO AVVENUTO), OPPURE
            - Il documento web corrente era incompleto, ma l'hai cercata e recuperata con successo tramite una ricerca web dedicata.
       - 3. L'intero albero delle dipendenze è risolto e non ci sono più sottoricette pendenti o rami da esplorare.
       - 4. Non hai più nessun tool di ricerca da invocare.
@@ -52,7 +52,7 @@ def think_tool(reflection: str) -> str:
     Concludi il tuo ragionamento con "STATO: FINITO" SOLO E RIGOROSAMENTE DOPO aver:
     1. Eletto la MIGLIORE "Ricetta Madre" (Score 1) e scartato le versioni inferiori (Score 0).
     2. Dichiarato quali "Sottoricette" essa richiede esplicitamente.
-    3. Valutato a cascata tutti gli altri documenti, dando Score 1 SOLO alle sottoricette richieste dalla Ricetta Madre (applicando la Regola di Salvataggio se c'è un solo file per quella sottoricetta).
+    3. Valutato a cascata tutti gli altri documenti, dando Score 1 SOLO alle sottoricette richieste dalla Ricetta Madre.
     4. Assegnato Score 0 a qualsiasi ricetta "orfana" o fuori tema.
     5. Scritto fisicamente l'elenco esatto con l'ID di TUTTI i documenti e il relativo Score. Non puoi tralasciarne nessuno.
 
