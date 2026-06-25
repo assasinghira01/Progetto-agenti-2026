@@ -2,6 +2,7 @@ import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from neo4j import GraphDatabase
 from datetime import datetime
+from langchain_core.messages import HumanMessage
 
 
 class CucinaKnowledgeGraph:
@@ -17,7 +18,7 @@ class CucinaKnowledgeGraph:
         self._crea_indice_vettoriale()
 
     def _crea_indice_vettoriale(self):
-        """Prepara il database a grafo per la ricerca semantica K-RAG."""
+        """Prepara il database a grafo per la ricerca semantica."""
         query = """
         CREATE VECTOR INDEX recipe_embedding_index IF NOT EXISTS
         FOR (r:Ricetta) ON (r.embedding)
@@ -31,6 +32,133 @@ class CucinaKnowledgeGraph:
             print(
                 " [NEO4J] Indice vettoriale 'recipe_embedding_index' verificato/creato."
             )
+
+    def init_blog_style(
+        self,
+        tono: str = "amichevole e appassionato",
+        registro: str = "informale ma preciso, ricco di aneddoti culturali siciliani",
+        lunghezza_target: int = 600,
+        audience: str = "appassionati di cucina tradizionale siciliana, livello intermedio",
+        note_stilistiche: str = (
+            "Usa sempre la seconda persona singolare per coinvolgere il lettore. "
+            "Includi almeno un rimando culturale o storico per ogni ricetta. "
+            "Evita termini tecnici senza spiegarli. "
+            "Il titolo deve essere evocativo, non descrittivo."
+        ),
+    ):
+        """
+        Crea (o aggiorna) il nodo singleton BlogStyle e lo collega al Blog
+        tramite USA_STILE. Il campo aggiornato_il tiene traccia della versione
+        dello stile: i Post collegati via SCRITTO_CON (creata in salva_post)
+        restano tracciabili anche se lo stile cambia in futuro.
+        """
+        data_oggi = datetime.now().strftime("%Y-%m-%d")
+        with self.driver.session() as session:
+            session.run(
+                """
+                MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
+                MERGE (s:BlogStyle { name: "stile_blog" })
+                SET s.tono              = $tono,
+                    s.registro          = $registro,
+                    s.lunghezza_target  = $lunghezza_target,
+                    s.audience          = $audience,
+                    s.note_stilistiche  = $note_stilistiche,
+                    s.aggiornato_il     = $data
+                MERGE (b)-[:USA_STILE]->(s)
+                """,
+                tono=tono,
+                registro=registro,
+                lunghezza_target=lunghezza_target,
+                audience=audience,
+                note_stilistiche=note_stilistiche,
+                data=data_oggi,
+            )
+        print("[NEO4J] Nodo BlogStyle aggiornato e collegato al Blog via USA_STILE.")
+
+    def get_contesto_editoriale(self, topic_corrente: str, n_post: int = 3) -> dict:
+        """
+        Recupera dal KG il contesto editoriale completo per il writer_node:
+          - Linee guida stilistiche del blog (nodo BlogStyle)
+          - Claim chiave dei post recenti NON relativi al topic corrente
+            (per creare rimandi o evitare ripetizioni)
+          - Topic già trattati di recente (per segnalare connessioni tematiche)
+        """
+        with self.driver.session() as session:
+
+            # 1. Stile del blog
+            style_result = session.run("""
+                MATCH (s:BlogStyle)
+                RETURN s.tono               AS tono,
+                       s.registro           AS registro,
+                       s.lunghezza_target   AS lunghezza,
+                       s.audience           AS audience,
+                       s.note_stilistiche   AS note
+                LIMIT 1
+            """)
+            style_record = style_result.single()
+            style = dict(style_record) if style_record else {}
+
+            # 2. Claim degli ultimi N post (escluso il topic corrente)
+            claim_result = session.run(
+                """
+                MATCH (p:Post)-[:PARLA_DI]->(r:Ricetta)
+                WHERE toLower(r.name) <> toLower($topic)
+                WITH p, r
+                ORDER BY p.data DESC
+                LIMIT $limit
+                MATCH (p)-[:HA_CLAIM]->(c:Claim)
+                RETURN r.name AS topic_post,
+                       p.titolo AS titolo_post,
+                       collect(c.testo) AS claims
+                """,
+                topic=topic_corrente.strip(),
+                limit=n_post,
+            )
+
+            claim_per_post = []
+            for record in claim_result:
+                claim_per_post.append(
+                    {
+                        "topic": record["topic_post"],
+                        "titolo": record["titolo_post"],
+                        "claims": record["claims"],
+                    }
+                )
+
+            # 3. Topic correlati per ingredienti condivisi (connessioni tematiche)
+            correlati_result = session.run(
+                """
+                MATCH (r_corrente:Ricetta { name: $topic })-[:CONTIENE]->(i:Ingrediente)
+                      <-[:CONTIENE]-(r_altro:Ricetta)<-[:PARLA_DI]-(p:Post)
+                WHERE toLower(r_altro.name) <> toLower($topic)
+                RETURN DISTINCT r_altro.name AS topic_correlato,
+                                collect(DISTINCT i.name)[..3] AS ingredienti_comuni
+                LIMIT 3
+                """,
+                topic=topic_corrente.strip().capitalize(),
+            )
+
+            correlati = []
+            for record in correlati_result:
+                correlati.append(
+                    {
+                        "topic": record["topic_correlato"],
+                        "ingredienti_comuni": record["ingredienti_comuni"],
+                    }
+                )
+
+        print(
+            f"[NEO4J] Contesto editoriale recuperato: "
+            f"style={'sì' if style else 'no'}, "
+            f"claim_post={len(claim_per_post)}, "
+            f"correlati={len(correlati)}"
+        )
+
+        return {
+            "style": style,
+            "claim_correlati": claim_per_post,
+            "topic_correlati": correlati,
+        }
 
     def get_ultimi_post_pubblicati(self, limite: int = 5):
         """
@@ -134,6 +262,8 @@ class CucinaKnowledgeGraph:
         ingredienti_diretti: list | None = None,
         sotto_ricette: list | None = None,
         fonte: str = "",
+        testo_post: str = "",
+        llm=None,
     ):
         ingredienti_diretti = ingredienti_diretti or []
         sotto_ricette = sotto_ricette or []
@@ -163,15 +293,15 @@ class CucinaKnowledgeGraph:
                 session.run(
                     """
                     MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
-
+ 
                     MERGE (madre:Ricetta { name: $topic_originale })
                     SET madre.embedding = $vettore_madre
-
+ 
                     MERGE (variante:Ricetta { name: $topic_finale })
                     SET variante.embedding = $vettore_finale
-
+ 
                     MERGE (variante)-[:IS_VARIANTE_DI]->(madre)
-
+ 
                     CREATE (p:Post { titolo: $titolo, data: $data })
                     MERGE (b)-[:HA_PUBBLICATO]->(p)
                     MERGE (p)-[:PARLA_DI]->(variante)
@@ -183,6 +313,15 @@ class CucinaKnowledgeGraph:
                     vettore_madre=vettore_madre,
                     vettore_finale=vettore_finale,
                 )
+
+                session.run(
+                    """
+                    MATCH (p:Post { titolo: $titolo })
+                    MATCH (s:BlogStyle { name: "stile_blog" })
+                    MERGE (p)-[:SCRITTO_CON]->(s)
+                    """,
+                    titolo=titolo_post,
+                )
                 print(
                     f"[NEO4J] Variante '{op_finale}' -> '{op_madre}' salvata con vettori."
                 )
@@ -191,10 +330,10 @@ class CucinaKnowledgeGraph:
                 session.run(
                     """
                     MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
-
+ 
                     MERGE (r:Ricetta { name: $topic_originale })
                     SET r.embedding = $vettore_madre
-
+ 
                     CREATE (p:Post { titolo: $titolo, data: $data })
                     MERGE (b)-[:HA_PUBBLICATO]->(p)
                     MERGE (p)-[:PARLA_DI]->(r)
@@ -203,6 +342,15 @@ class CucinaKnowledgeGraph:
                     titolo=titolo_post,
                     data=data_oggi,
                     vettore_madre=vettore_madre,
+                )
+
+                session.run(
+                    """
+                    MATCH (p:Post { titolo: $titolo })
+                    MATCH (s:BlogStyle { name: "stile_blog" })
+                    MERGE (p)-[:SCRITTO_CON]->(s)
+                    """,
+                    titolo=titolo_post,
                 )
                 print(f"[NEO4J] Ricetta standard '{op_madre}' salvata con vettori.")
 
@@ -217,15 +365,15 @@ class CucinaKnowledgeGraph:
                     MATCH (r:Ricetta {
                         name: $topic_finale
                     })
-
+ 
                     UNWIND $ingredienti AS ing
-
+ 
                     MERGE (i:Ingrediente {
                         name: toLower(trim(ing.nome))
                     })
-
+ 
                     MERGE (r)-[rel:CONTIENE]->(i)
-
+ 
                     SET rel.quantita = ing.quantita
                     """,
                     topic_finale=op_finale,
@@ -274,8 +422,8 @@ class CucinaKnowledgeGraph:
                     topic_finale=op_finale,
                     nome_specifico=nome_specifico,
                     classe_astratta=classe_astratta,
-                    vettore_specifico=vettore_specifico,  # Passiamo i vettori
-                    vettore_astratto=vettore_astratto,  # Passiamo i vettori
+                    vettore_specifico=vettore_specifico,
+                    vettore_astratto=vettore_astratto,
                 )
 
                 ingredienti_sub = sub.get("ingredienti", [])
@@ -310,11 +458,11 @@ class CucinaKnowledgeGraph:
                     MATCH (p:Post {
                         titolo: $titolo
                     })
-
+ 
                     MERGE (f:Fonte {
                         url: $fonte
                     })
-
+ 
                     MERGE (p)-[:USA_FONTE]->(f)
                     """,
                     titolo=titolo_post,
@@ -323,7 +471,80 @@ class CucinaKnowledgeGraph:
 
                 print(f"[NEO4J] Fonte registrata.")
 
+            # ==================================================
+            # CLAIM — estratti dal testo del post tramite LLM
+            # ==================================================
+            if testo_post and llm:
+                claim_estratti = self._estrai_claim(testo_post, topic_finale, llm)
+
+                if claim_estratti:
+                    session.run(
+                        """
+                        MATCH (p:Post { titolo: $titolo })
+                        UNWIND $claims AS testo_claim
+                        CREATE (c:Claim { testo: testo_claim })
+                        MERGE (p)-[:HA_CLAIM]->(c)
+                        """,
+                        titolo=titolo_post,
+                        claims=claim_estratti,
+                    )
+                    print(
+                        f"[NEO4J] {len(claim_estratti)} claim salvati per '{titolo_post}'."
+                    )
+                else:
+                    print(
+                        "[NEO4J] Nessun claim estratto (testo vuoto o LLM non disponibile)."
+                    )
+
         print(f"[NEO4J] Post '{titolo_post}' " f"salvato correttamente.")
+
+    def _estrai_claim(self, testo_post: str, topic: str, llm) -> list[str]:
+        """
+        Usa l'LLM per estrarre 3-5 claim chiave dal testo del post.
+        I claim sono affermazioni fattuali brevi che possono essere richiamate
+        nei post successivi per creare coerenza editoriale.
+        """
+        prompt = f"""
+        Leggi il seguente post di un blog di cucina sul tema '{topic}'.
+        Estrai esattamente 3-5 CLAIM CHIAVE: affermazioni fattuali, tecniche o culturali
+        brevi (max 25 parole ciascuna) che potrebbero essere richiamate o referenziate
+        in futuri post per creare coerenza editoriale.
+
+        Esempi di claim ben formati:
+        - "La besciamella richiede un roux di burro e farina in parti uguali."
+        - "La pasta alla norma è un primo piatto tradizionale catanese con melanzane fritte."
+        - "Il ragù siciliano si distingue da quello bolognese per l'uso del vino bianco."
+
+        Rispondi SOLO con una lista Python valida di stringhe, senza altro testo.
+        Esempio: ["claim 1", "claim 2", "claim 3"]
+
+        POST:
+        {testo_post[:3000]}
+        """
+        try:
+            risposta = llm.invoke([HumanMessage(content=prompt)])
+            testo = risposta.content.strip()
+
+            # Pulizia robusta: togliamo eventuali backtick o prefissi
+            testo = testo.replace("```python", "").replace("```", "").strip()
+
+            # Parsing della lista
+            import ast
+
+            claim_list = ast.literal_eval(testo)
+
+            if isinstance(claim_list, list):
+                # Filtriamo claim troppo lunghi o vuoti
+                return [
+                    c.strip()
+                    for c in claim_list
+                    if isinstance(c, str) and 5 < len(c) < 200
+                ]
+
+        except Exception as e:
+            print(f"[NEO4J] Errore estrazione claim: {e}")
+
+        return []
 
     def __del__(self):
         """Si attiva automaticamente quando l'oggetto viene rimosso dalla memoria."""

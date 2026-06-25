@@ -153,7 +153,7 @@ def esegui_ricerca_web(query: str) -> str:
     print(f"{ricette_valutate}\n")
     print("QUELLE ORDINATE.")
     ricette_valutate.sort(key=lambda x: x[0], reverse=True)
-    migliori = ricette_valutate[:1]
+    migliori = ricette_valutate[:2]
     print(f"{migliori}")
     # 6. Costruisci output solo con le migliori
     output_list = []

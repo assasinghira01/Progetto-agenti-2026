@@ -6,7 +6,7 @@ from tools.rag_tool import cerca_ricetta_nel_db
 from tools.kg_tool import (
     controlla_storico_post,
     get_ultimi_post,
-    get_ingredienti_per_variante,
+    get_ingredienti,
 )
 
 load_dotenv()
@@ -23,7 +23,7 @@ lista_tools = [
     esegui_ricerca_web,
     cerca_ricetta_nel_db,
     controlla_storico_post,
-    get_ingredienti_per_variante,
+    get_ingredienti,
     think_tool,
 ]
 

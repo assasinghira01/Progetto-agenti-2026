@@ -46,7 +46,7 @@ def controlla_storico_post(topic: str) -> str:
 
 
 @tool
-def get_ingredienti_per_variante(nome_ricetta: str) -> str:
+def get_ingredienti(nome_ricetta: str) -> str:
     """
     Tool FONDAMENTALE da usare SOLO quando controlla_storico_post ti dice che un topic è BLOCCATO.
     Interroga il Knowledge Graph per estrarre gli ingredienti principali del piatto bloccato.

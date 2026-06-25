@@ -97,12 +97,10 @@ class RecipeDraft(BaseModel):
     titolo: str = Field(
         description="Titolo accattivante per il post, con la PRIMA LETTERA MAIUSCOLA (es. 'Lasagne alla bolognese')."
     )
-    introduzione: str = Field(
-        description="Breve introduzione discorsiva (max 30 parole)"
-    )
+    introduzione: str = Field(description="Breve introduzione discorsiva")
     sotto_ricette: list[SottoRicetta] = Field(
-        description="Eventuali preparazioni secondarie che richiedono trasformazione o cottura (es. Ragù, Besciamella, Creme). "
-        "NON creare sottoricette per condimenti a crudo o prodotti industriali pronti."
+        description="Eventuali preparazioni individuate nella ricetta madre che fungono da ulteriore ricetta autonoma (es. Ragù, Besciamella, Creme). "
+        "NON creare sottoricette per preparazioni troppo semplici, considera i documenti che ti sono stati forniti e il procedimento della ricetta madre."
     )
     ingredienti_diretti: list[Ingrediente] = Field(
         description="Ingredienti principali che compongono DIRETTAMENTE la Ricetta Madre (escludendo quelli che appartengono alle sottoricette)."

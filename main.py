@@ -9,6 +9,7 @@ from rag.vector_db import popola_database_rag
 from tools.rag_tool import inizializza_vector_store
 from graph.workflow import app
 from langgraph.types import Command
+from knowledge_graph.neo4j_manager import kg_client
 
 
 def main():
@@ -19,6 +20,7 @@ def main():
     # Inizializziamo o carichiamo il database vettoriale locale
     popola_database_rag()
     inizializza_vector_store()
+    # kg_client.init_blog_style()
 
     while True:
         print("\n=== MENU PRINCIPALE ===")
@@ -134,15 +136,26 @@ def main():
                 break
 
             print("\n--- BOZZA POST ---\n", bozza, "\n----------------")
-            scelta = input("1=APPROVA  2=MODIFICA  3=RIGENERA: ").strip()
+            scelta = input("1=APPROVA:\n2=MODIFICA:\n3=RIGENERA\n:4=SCARTA:\n ").strip()
 
             if scelta == "1":
+
                 comando = Command(resume="APPROVA")
             elif scelta == "2":
-                modifica = input("Modifiche: ")
-                comando = Command(resume=modifica)
-            else:
+                istruzioni = input(
+                    "\n Scrivi le tue istruzioni di modifica:\n> "
+                ).strip()
+                comando = Command(resume=f"MODIFICA:{istruzioni}")
+            elif scelta == "3":
                 comando = Command(resume="RIGENERA")
+
+            elif scelta == "4":
+                comando = Command(resume="SCARTA")
+
+            else:
+                print("si è verificato un errore")
+                continue
+
         else:
             print(f"Nodo {prossimo_nodo} non gestito, esco.")
             break

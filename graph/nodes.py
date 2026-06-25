@@ -1,3 +1,4 @@
+from langgraph.graph import END
 from langgraph.types import Command
 from langchain_core.messages import (
     RemoveMessage,
@@ -166,23 +167,25 @@ def planner_node(state: Blog_Cucina):
     Sei il Direttore Editoriale di un blog di cucina. Analizza la direttiva dell'utente, assicurandoti che non ci siano duplicati.
 
     REGOLE DEL FLUSSO AUTONOMO E RISOLUZIONE CONFLITTI (ReAct):
-    1. VERIFICA INIZIALE: Usa SEMPRE `controlla_storico_post` per verificare se la direttiva dell'utente è già stata pubblicata.
+     FASE 1. VERIFICA INIZIALE: Usa SEMPRE `controlla_storico_post` per verificare se la direttiva dell'utente è già stata pubblicata.
        APPENA RICEVI LA RISPOSTA DEL TOOL, prima di fare qualsiasi altra cosa o chiamare altri tool di ricerca, DEVI chiamare il `think_tool`.
+        
     
-    2. PROCEDURA DI BLOCCO E RAGIONAMENTO RAG (SEGUI ALLA LETTERA):
-       Se il database risponde "BLOCCATO", NON generare idee a caso. Esegui questa sequenza esatta:
-       - AZIONE 1: Chiama immediatamente il tool `ottieni_ingredienti_ricetta` passando il nome del piatto bloccato.
+    
+     FASE 2. PROCEDURA Di RAGIONAMENTO  (SEGUI ALLA LETTERA):
+       se il database risponde "OK" la direttiva dell'utente non è ancora stata pubblicata. Non hai bisogno di proporre varianti. Vai direttamente alla FASE 3
+       Se il database risponde "BLOCCATO",  direttiva dell'utente è già stata pubblicata. NON generare idee a caso. Esegui questa sequenza esatta SOLO SE il database risponde "BLOCCATO":
+       - AZIONE 1: Chiama immediatamente il tool `get_ingredienti` passando il nome del piatto bloccato.
        - AZIONE 2: Attendi i risultati da Neo4j (gli ingredienti).
-       - AZIONE 3: Chiama il tuo `think_tool` per ragionare sugli ingredienti estratti.
-       
-       NEL THINK_TOOL, SCEGLI LA STRATEGIA:
-       - Opzione A (Variante): Se il piatto è facilmente personalizzabile nei gusti , proponi una variante .
-       - Opzione B (Ricetta Simile): Se il piatto è una preparazione tradizionale strutturata (es. Arancini, Carbonara, Lasagne), usa gli ingredienti per trovare un piatto simile ma concettualmente diverso (es. "Supplì", "Gricia", "Cannelloni").
-       
-       - AZIONE 4: Dopo aver ragionato ed elaborato la nuova idea, verifica la TUA NUOVA proposta chiamando di nuovo `controlla_storico_post`.
-       - Ripeti il ciclo se la nuova idea è ancora bloccata.
+       - AZIONE 3: Chiama il tuo `think_tool` per ragionare sugli ingredienti estratti e scegli 2 opzioni.
+            - Opzione A (Variante): Se il piatto è facilmente personalizzabile nei gusti , proponi una variante .
+            - Opzione B (Ricetta Simile): Se il piatto è una preparazione tradizionale strutturata (es. Arancini, Carbonara, Lasagne), usa gli ingredienti per trovare un piatto simile ma concettualmente diverso (es. "Supplì", "Gricia", "Cannelloni").
 
-    3. CONCLUSIONE:
+        - AZIONE 4: Dopo aver ragionato ed elaborato la nuova idea, verifica la TUA NUOVA proposta chiamando di nuovo `controlla_storico_post`.
+        - Ripeti il ciclo se la nuova idea è ancora bloccata. SE una tua idea riceve "OK" vai alla FASE 3
+    
+
+     FASE 3. CONCLUSIONE:
        - Solo quando avrai ottenuto un "OK" , il topic che hai generato andrà bene e  potrai concludere.
        - Termina scrivendo: "STATO: FINITO".
        
@@ -198,24 +201,26 @@ def planner_node(state: Blog_Cucina):
             
             [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE proporre il topic in caso di duplicato.
     """
+
         # 2. GESTIONE DEL FEEDBACK: RIGENERA TOTALE CON BLACKLIST
         if feedback == "rigenera":
             print(f"   [Planner] Rilevato 'rigenera' singolo. Blacklist: {blacklist}")
             testo_prompt += f"""
             
             --- FEEDBACK UTENTE (PROPOSTA SINGOLA RIFIUTATA) ---
-            ATTENZIONE: La tua idea precedente è stata BOCCIATA. 
+            ATTENZIONE: La tua idea precedente è stata BOCCIATA e si trova debtro la  {blacklist} . 
             
-            REGOLA ASSOLUTA: NON PROPORRE NESSUNO DI QUESTI TOPIC SCARTATI NELLA TUA BLACKLIST:
+            REGOLA ASSOLUTA: NON PROPORRE NESSUNO DI QUESTI TOPIC SCARTATI NELLA TUA BLACKLIST perche l'utente li ha bocciati:
             [{blacklist}]
             
-            Devi elaborare un'idea COMPLETAMENTE NUOVA e DIVERSA evitando la blacklist.
+            Devi elaborare un'idea COMPLETAMENTE NUOVA e DIVERSA evitando i dati contenunti in:  {blacklist}.
             
             --- REGOLE DI WORKFLOW PER LA RIGENERAZIONE ---
             1. Nel tuo PRIMO utilizzo del `think_tool`, dichiara di aver ricevuto il feedback negativo e menziona la blacklist che eviterai a tutti i costi.
-            2. Usa `controlla_storico_post` per verificare la tua NUOVA idea.
+            2. Usa `controlla_storico_post` per verificare ESCLUSIVAMENTE 2la tua NUOVA idea.
             3. Se risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti.
             4. 🚨 REGOLA DI STOP: Appena ricevi un "OK" definitivo, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO".
+            
             
             
             ## Formato dei topic (REGOLA FERREA)
@@ -228,6 +233,7 @@ def planner_node(state: Blog_Cucina):
             - ✅ CORRETTO: "Verdure grigliate"
             - ✅ CORRETTO: "Filetto di manzo al pepe verde"
             - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
+            non devi mai proporre nessuno di questi topic [{blacklist}]!!
             """
 
         # 3. GESTIONE DEL FEEDBACK: MODIFICA GUIDATA
@@ -256,7 +262,7 @@ def planner_node(state: Blog_Cucina):
             --- REGOLE DI WORKFLOW PER LA MODIFICA ---
             1. Nel tuo PRIMO `think_tool`, dichiara: qual era il topic scartato e quale nuova strada hai deciso di intraprendere basandoti sulle istruzioni dell'utente.
             2. Usa `controlla_storico_post` SOLO per verificare il NUOVO topic che stai introducendo.
-            3. Se il nuovo topic risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti (usa `ottieni_ingredienti_ricetta` e poi ragiona su Variante o Ricetta Simile).
+            3. Se il nuovo topic risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti (usa `get_ingredienti` e poi ragiona su Variante o Ricetta Simile).
             4. 🚨 REGOLA DI STOP (IMPORTANTISSIMA): Appena ricevi un "OK" definitivo dal database per la tua nuova proposta, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO". È severamente vietato proporre idee aggiuntive o continuare a usare il think_tool.
                         
                                 
@@ -272,46 +278,62 @@ def planner_node(state: Blog_Cucina):
             - NON cercare dati online o in locale. Il tuo compito è solo pianificare.          
             [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE pianificare internamente.
             """
-        # 4. COMPILAZIONE DEL PROMPT FINALE
-        prompt = SystemMessage(content=testo_prompt)
-    # ==========================================================
-    # 5. GESTIONE DELL'ESECUZIONE E ROUTING
-    # ==========================================================
 
-    # CASO A: Ritorno da un Tool (il ragionamento è in corso)
+        prompt = SystemMessage(content=testo_prompt)
+
+    # Ritorno da un Tool (il ragionamento è in corso)
     if messaggi and isinstance(messaggi[-1], ToolMessage):
         risposta_llm = llm_con_tools.invoke([prompt] + messaggi)
         return {"messages": [risposta_llm], "nodo_chiamante": "planner"}
 
-    # CASO B: Ritorno da Feedback Umano (I messaggi sono vuoti)
+    # Ritorno da Feedback Umano (I messaggi sono vuoti)
     elif feedback and not messaggi:
         print("   [Planner] Riavvio agente con innesco dinamico...")
 
-        # Testo di innesco dinamico potenziato
+        # in base al feedback
         if "rigenera" in feedback:
-            innesco = (
-                "L'utente ha rifiutato la tua ultima proposta. \n"
-                "⚠️ LA TUA PRIMA AZIONE IN ASSOLUTO DEVE ESSERE CHIAMARE IL `think_tool`. \n"
-                "Nel `think_tool` DEVI scrivere testualmente: 'Non proporrò i seguenti piatti perché sono nella blacklist: "
-                f"[{blacklist}]'. Solo dopo aver scritto questo, puoi iniziare a elaborare 3 idee COMPLETAMENTE DIVERSE."
+
+            # Distinguiamo tra pianificazione automatica e post singolo
+            if input == "PIANIFICAZIONE_AUTOMATICA":
+                idee = "3 idee COMPLETAMENTE DIVERSE"
+                stop = "Appena hai 3 topic approvati"
+            else:
+                idee = "1 SOLA idea COMPLETAMENTE DIVERSA"
+                stop = "Appena ricevi 1 solo OK definitivo"
+
+            messaggio = (
+                "L'utente ha rifiutato la tua ultima proposta.\n"
+                "⚠️ LA TUA PRIMA AZIONE IN ASSOLUTO DEVE ESSERE CHIAMARE IL `think_tool`.\n"
+                "Nel `think_tool` DEVI scrivere testualmente: 'Non proporrò i seguenti piatti "
+                f"perché sono nella blacklist: [{blacklist}]'.\n"
+                f"Solo dopo aver scritto questo, puoi iniziare a elaborare {idee}.\n"
+                f"🚨 REGOLA DI STOP: {stop}, FERMATI IMMEDIATAMENTE con 'STATO: FINITO'."
             )
-        else:
-            innesco = (
-                "L'utente ha richiesto una modifica specifica. \n"
-                "⚠️ LA TUA PRIMA AZIONE IN ASSOLUTO DEVE ESSERE CHIAMARE IL `think_tool`. \n"
-                "Nel `think_tool` DEVI confermare di aver capito la modifica e ribadire che ignorerai questi piatti: "
-                f"[{blacklist}]. Non usare altri tool prima di aver fatto questo."
+
+        else:  # caso modifica
+
+            if input == "PIANIFICAZIONE_AUTOMATICA":
+                idee = "1 NUOVO topic (mantenendo gli altri 2 del piano precedente)"
+            else:
+                idee = "1 SOLO nuovo topic"
+
+            messaggio = (
+                "L'utente ha richiesto una modifica specifica.\n"
+                "⚠️ LA TUA PRIMA AZIONE IN ASSOLUTO DEVE ESSERE CHIAMARE IL `think_tool`.\n"
+                f"Nel `think_tool` DEVI confermare di aver capito la modifica e che cercherai {idee}.\n"
+                f"Blacklist da ignorare: [{blacklist}].\n"
+                "🚨 REGOLA DI STOP: Appena ricevi 1 OK definitivo, FERMATI con 'STATO: FINITO'."
             )
 
         messaggi_da_inviare = [
             prompt,
-            HumanMessage(content=innesco),
+            HumanMessage(content=messaggio),
         ]
         risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
 
         return {"messages": [risposta_llm], "nodo_chiamante": "planner"}
 
-    # CASO C: Primissimo avvio - Pianificazione Automatica
+    #  Primissimo avvio - Pianificazione Automatica
     elif input == "PIANIFICAZIONE_AUTOMATICA":
         messaggi_da_inviare = [
             prompt,
@@ -320,7 +342,7 @@ def planner_node(state: Blog_Cucina):
         risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
         return {"messages": [risposta_llm], "nodo_chiamante": "planner"}
 
-    # CASO D: Primissimo avvio - Post Singolo
+    # Primissimo avvio - Post Singolo
     else:
         input_utente = state["input_utente"]
 
@@ -544,91 +566,204 @@ def human_review_variante(state: Blog_Cucina):
 def krag_research_node(state: Blog_Cucina):
     print("\n--- [NODO 2: RICERCA MCP (Agente Autonomo)] ---")
     topic = state["topic_corrente"]
-    print(f"{topic}")
+    post_rifiutato = state.get("post_draft", "")
+    is_rigenera = state.get("is_rigenera", False)
     reasoning_trace = state.get("reasoning_trace", [])
+    riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
+    print(f"{topic}")
     messaggi = state.get("messages", [])
 
-    testo = f"""
-    Sei un Agente Investigatore esperto, specializzato in recupero dati culinari.
-    Il tuo obiettivo è raccogliere la ricetta completa per il topic: '{topic}' e TUTTE le sue eventuali sottoricette.
+    testo_base = f"""
+    Sei un Agente Investigatore esperto, specializzato in recupero dati culinari. Il tuo obiettivo è raccogliere DATI per la ricetta completa per il topic: '{topic}' e TUTTE le sue eventuali sottoricette.
+    seguendo l'algoritmo. Solo quando avrai completato l'albero delle sottoricette di TUTTE le Ricette Madri potrai dichiarare "STATO: FINITO".
+    ---
+    ###  REGOLE GENERALI (LEGGI CON ATTENZIONE)
+    
+            
+        ### CLASSIFICAZIONE PRELIMINARE DEL TOPIC (FONDAMENTALE)
+            Prima di applicare l'algoritmo, classifica mentalmente il topic in uno di questi tipi:
 
-    ### L'ALGORITMO DI RICERCA (DA SEGUIRE IN LOOP)
-    Per OGNI elemento che devi cercare (partendo dal topic principale '{topic}', e applicando poi la stessa identica logica a ogni singola sottoricetta che trovi), esegui questa esatta sequenza:
+            **TIPO A – RICETTA COMPLESSA CON SOTTORICETTE**  
+            Preparazioni che richiedono altre preparazioni  (es. lasagne,setteveli,insalata russa, ecc...).  
+            → Applica l'algoritmo ricorsivo completo.
 
-    ▶ PASSO 1: RICERCA LOCALE (DB FIRST)
-    - Usa `get_ingredienti_per_variante` (per interrogare il Knowledge Graph) e poi `cerca_ricetta_nel_db` cercando il VERO NOME dell'elemento corrente.
-    - VALUTAZIONE: I risultati del DB contengono la ricetta ESATTA e COMPLETA (ingredienti e procedimento)?
-        - SE SÌ (Trovata in DB): Il DB è la Verità Assoluta. TI È VIETATO usare il web per questa ricetta. Salta il Passo 2 e vai direttamente al PASSO 3.
-        - SE NO (Assente o Incompleta): La ricerca locale è fallita. Passa al PASSO 2.
+            **TIPO B – RICETTA SEMPLICE / ASSEMBLAGGIO**  
+            Piatti dove gli ingredienti vengono usati direttamente, al massimo con semplici operazioni di taglio, schiacciatura o miscelatura (es. bruschette, insalate, toast, carpacci, macedonie).  
+            → Raccogli la ricetta madre e FERMATI. **Non cercare sottoricette**. Se trovi più versioni, raccoglile come documenti separati ma non cercare sottoricette per nessuna.
+            
 
-    ▶ PASSO 2: IL FILTRO DELLA RETROSPETTIVA (CORTOCIRCUITO O WEB)
-    Se il PASSO 1 ha fallito, ti è SEVERAMENTE VIETATO invocare subito il tool 'esegui_ricerca_web'.
-    - Rileggi e controlla attentamente il documento della Ricetta Principale che hai ricevuto precedentemente.
-    - Contiene già gli ingredienti , le dosi e il procedimento per la sottoricetta corrente (es. se spiega già come fare la glassa o la pasta biscotto)?
-        - SE SÌ (Sottoricetta già inclusa): Il Cortocircuito è ATTIVATO. TI È TASSATIVAMENTE VIETATO chiamare `esegui_ricerca_web`. Utilizza il 'think_tool' e dichiara: "CORTOCIRCUITO: La sottoricetta di [Nome] è già interamente presente e descritta nel testo principale in memoria." e PASSA DIRETTAMENTE al PASSO 3.
-        - SE NO (Mancante o solo citata): Solo adesso SEI AUTORIZZATO ad invocare `esegui_ricerca_web` usando come query il nome specifico della sottoricetta corrente. Fatto ciò, PASSA al PASSO 3.
+        1. **PENSIERO OBBLIGATORIO**: Prima di chiamare QUALSIASI tool di ricerca("esegui_ricerca_web" e "cerca_ricetta_nel_db"), DEVI chiamare `think_tool` spiegando:
+            - In quale FASE ti trovi
+            - Cosa stai per fare e perché
+            - Concludi con "STATO: CONTINUO" (o "STATO: FINITO" se hai completato TUTTO)
 
-    ▶ PASSO 3: GESTIONE SOTTORICETTE E ASTRAZIONE (RICORSIONE)
-    - Leggi attentamente gli ingredienti e il procedimento della ricetta appena acquisita (dal DB, dal Web o tramite cortocircuito).
-    - Cerca eventuali SOTTORICETTE nascoste o esplicite applicando questi due criteri:
-        1. CRITERIO ESPLICITO: Nei documenti del DB, se trovi la dicitura esatta "(vedi preparazione base)", sei sicuro che quella è una sottoricetta.
-        2. CRITERIO DEDUTTIVO (ASTRAZIONE): Nei documenti del WEB e in alcuni casi anche nel DB, identifica la presenza di una sottoricetta deducendola dal procedimento (es. preparazioni complesse come besciamella,pastella, maionese, ragù, crema, glassa a specchio,glassa, ganache, pasta biscotto ecc..).
-    - SE NE TROVI: 
-        - Astrai il VERO NOME della preparazione (es. se leggi "preparare il ripieno di carne", il vero nome è "Ragù").
-        - Considera questo VERO NOME come un nuovo topic pendente e RIPARTI IMMEDIATAMENTE DAL PASSO 1 per cercarlo (iniziando dal DB locale).
-    - SE NON NE TROVI: La ricerca per questo specifico ramo è conclusa.
+        2. **QUERY ESPANSE (get_ingredienti)**:
+            - Per OGNI nuovo elemento che cerchi (Ricetta Madre o sottoricetta), DEVI chiamare `get_ingredienti` UNA VOLTA per ottenere una query espansa.
+            - Se stai ritentando la ricerca dello STESSO elemento (es. dopo fallimento), NON chiamare di nuovo `get_ingredienti` – riutilizza la query che hai già.
+            - Usa SEMPRE la query espansa per `cerca_ricetta_nel_db`.
+        
 
-    ### REGOLE DI FERRO E DIVIETI (PENA IL FALLIMENTO)
-    1. PENSIERO OBBLIGATORIO: Prima di chiamare qualsiasi tool, chiama il 'think_tool'. Spiega a che punto sei dell'algoritmo. Concludi sempre con "STATO: CONTINUO". Usa "STATO: FINITO" SOLO QUANDO hai risolto l'intera struttura (Ricetta principale + Tutte le sottoricette pendenti).
-    2. DIVIETO DI COMPROMESSO: Non accettare mai risultati parziali. Se cerchi un sugo o una crema e il DB ti dà solo un "soffritto" o un "brodo", la ricerca locale è FALLITA. Devi passare al PASSO 2.
-    3. DIVIETO DI FUSIONE: Se il web restituisce più ricette, NON UNIRLE MAI.
-    4. DIVIETO DI SCRITTURA: Non elencare mai gli ingredienti o i procedimenti nel tuo ragionamento.
-    5. REGOLA ANTI-LOOP: Se una ricerca per una sottoricetta fallisce sia nel DB che sul Web (e non è presente nel monolite), dichiaralo nel think_tool e abbandona quel ramo senza riprovare all'infinito.
-    6. ASSOLUTO DIVIETO DI AMNESIA (CRITICO): Quando ti sposti su una sottoricetta, non ignorare i messaggi passati della chat. Il testo della ricetta principale è ancora lì. Rileggilo sempre al PASSO 2 per vedere se contiene già la soluzione, evitando di fare ricerche web ridondanti.
+  
+    ### L'ALGORITMO DI RICERCA
+
+    Per OGNI elemento che devi cercare (partendo da '{topic}', poi ogni sottoricetta), esegui questa sequenza:
+  
+    ▶ **FASE 1: RICERCA LOCALE (DB FIRST)**
+
+        1. **OTTIENI QUERY ESPANSA**: 
+        - Chiama `get_ingredienti` per l'elemento corrente (se non l'hai già fatto).
+        - Usa il risultato per costruire una query dettagliata.
+
+        2. **CERCA NEL DB**: 
+        - Usa `cerca_ricetta_nel_db` con la query espansa.
+
+        3. **VALUTA IL RISULTATO**:
+        - ✅ Se TROVATA una ricetta COMPLETA con ingredienti e procedimento chiari e coerente al topic richiesto dall'utente:
+            - Memorizza i dati.
+            - **VIETATO** usare il web per questa ricetta.
+            - Vai alla **FASE 2**.
+        - ❌ Se NON TROVATA, INCOMPLETA o incoerente al topic richiesto:
+            - chiama il think tool per analizzare il fallimento
+            - La ricerca locale è fallita.
+            - Vai al punto 4.
+            
+        4. **RICERCA WEB** (solo se il DB ha fallito):
+        - Usa `esegui_ricerca_web` per cercare l'elemento corrente.
+        - Memorizza i dati e vai alla **FASE 2**.
+    
+    ▶ **FASE 2: IL LOOP SOTTORICETTE**
+
+        Per OGNI documento WEB o DB della ricetta appena acquisita:
+
+        1. Leggi attentamente ingredienti e procedimento.
+        2. Cerca eventuali SOTTORICETTE applicando questi criteri:
+        - **CRITERIO ESPLICITO**: Se un ingrediente dice "(vedi preparazione base)" → è una sottoricetta.
+        - **CRITERIO DEDUTTIVO**: Se la ricetta richiede una preparazione complessa (besciamella, ragù, crema, pasta biscotto, glassa, pastella, ecc.) nei suoi ingredienti o passaggi → è una sottoricetta.
+
+        3. **Esito dell'analisi**:
+        - **NESSUNA SOTTORICETTA**: 
+            - Usa `think_tool` e scrivi "STATO: FINITO" per questa Ricetta Madre.
+            - Se ci sono altre Ricette Madri, passaci.
+        - **SOTTORICETTE TROVATE**: 
+            - Astrai il loro VERO NOME.
+            - Per OGNUNA, esegui la **FASE 3**.
+    
+    ▶ **FASE 3: LOOP SOTTORICETTE (eseguito per OGNI sottoricetta trovata)**
+
+    Per OGNI sottoricetta (es. "Maionese", "Besciamella", "Pasta biscotto"):
+
+    **CHECK 1: RICERCA LOCALE (DB) — PRIORITÀ ASSOLUTA**
+
+        1. **OTTIENI QUERY ESPANSA**:
+        - Se è la prima volta che cerchi questa sottoricetta, chiama `get_ingredienti` per essa.
+        - Usa la query espansa per `cerca_ricetta_nel_db`.
+
+        2. **CERCA NEL DB**:
+        - Usa `cerca_ricetta_nel_db` con la query espansa.
+
+        3. **VALUTA**:
+        - ✅ Se TROVATA una ricetta COMPLETA (ingredienti + procedimento):
+            - La sottoricetta è RISOLTA. Memorizza i dati.
+            - **PASSA ALLA PROSSIMA SOTTORICETTA**.
+        - ❌ Se NON TROVATA o INCOMPLETA:
+            - Procedi al **CHECK 2**.
+
+
+    **CHECK 2: CORTOCIRCUITO (MEMORIA DELLA RICETTA MADRE)**
+
+        1. Usa `think_tool` per analizzare la Ricetta Madre che hai in memoria.
+        2. Scrivi la riflessione in questo formato:
+
+        --- ANALISI ---
+        [Nome sottoricetta]: è già descritta nei passaggi della Ricetta Madre?
+
+        3. **Valuta**:
+        - ✅ Se SÌ: "CORTOCIRCUITO: [Nome] è già inclusa nei passaggi X,Y,Z. STATO: FINITO"
+            - La sottoricetta è RISOLTA. NON cercare altro.
+            - **PASSA ALLA PROSSIMA SOTTORICETTA**.
+        - ❌ Se NO: "CORTOCIRCUITO FALLITO: [Nome] non è descritta nella Ricetta Madre. STATO: CONTINUO"
+            - Procedi al **CHECK 3**.
+
+    **CHECK 3: RICERCA WEB (ULTIMA SPIAGGIA)**
+
+        1. Solo se il **CHECK 2** ha dato esito negativo, usa `esegui_ricerca_web` per cercare la sottoricetta.
+
+        2. **Valuta**:
+        - ✅ Se TROVATA: Memorizza, la sottoricetta è RISOLTA. **PASSA ALLA PROSSIMA**.
+        - ❌ Se NON TROVATA: Dichiara "FALLIMENTO: [Nome] non trovata né in DB né in Web. ABBANDONO il ramo."
+            - **PASSA ALLA PROSSIMA** (NON ripetere).
+
+
+    ▶ **TERMINAZIONE**
+
+    - Dopo aver risolto o abbandonato TUTTE le sottoricette di una Ricetta Madre, la Ricetta Madre è COMPLETA.
+    - Se ci sono altre Ricette Madri, processale una alla volta con lo stesso algoritmo.
+    - Solo quando TUTTE le Ricette Madri e TUTTE le loro sottoricette sono risolte, usa `think_tool` e scrivi "STATO: FINITO".
+
     ### STATO ATTUALE
-    Sei pronto ad agire. Inizia invocando il 'think_tool' per pianificare la prima mossa sul topic principale: '{topic}'.
+
+    Sei pronto ad agire. Inizia invocando `think_tool` dichiarando l'avvio della MACRO-FASE 1 per '{topic}'.
     """
 
-    prompt = SystemMessage(content=testo)
-    if not messaggi:
-        messaggi_da_inviare = [
-            prompt,
-            HumanMessage(content=f"Inizia la ricerca per il topic: {topic}"),
-        ]
+    riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
 
-    else:
+    # contesto rigenera
+    print(f"{is_rigenera}")
+    if is_rigenera:
+        print(f"post rifiutao: {post_rifiutato}")
+        if post_rifiutato:
+            contesto = f"""
+            ###  RIGENERAZIONE POST ###
+            Il post precedente su '{topic}' è stato RIFIUTATO dall'utente.
+            Bozza rifiutata (inizio): {post_rifiutato}...
+            Cerca NUOVE fonti o dettagli che possano rendere la nuova versione più completa, affidabile o interessante.
+            Non ripetere esattamente la bozza precedente.
+            """
+            testo_base = contesto + "\n" + testo_base
 
-        if reasoning_trace:
+    if messaggi and riflessioni_research:
 
-            ultime_riflessioni = [
-                r for r in reasoning_trace if r.startswith("[RESEARCH]")
-            ]
-
-            riepilogo = "\n".join(
-                f"- {r.replace('[RESEARCH] ', '')}" for r in ultime_riflessioni
+        if is_rigenera:
+            # Modalità  rigenerazione mostriamo tutto il ragionamento
+            riepilogo_trace = "\n".join(f"- {r}" for r in reasoning_trace)
+        else:
+            # Modalità normale mostriamo solo le riflessioni del research
+            riepilogo_trace = "\n".join(
+                f"- {r.replace('[RESEARCH] ', '')}" for r in riflessioni_research
             )
 
-            contesto_trace = f"""
-            ### RIEPILOGO DEL TUO RAGIONAMENTO FINORA
-            Queste sono le tue ultime riflessioni su questo topic.
-            Usale per non ripetere azioni già fatte e per decidere il passo successivo:
-            {riepilogo}
-            """
-        else:
-            contesto_trace = ""
+        contesto_trace = f"""
+        ### RIEPILOGO DEL TUO RAGIONAMENTO FINORA
+        Usale per non ripetere azioni già fatte e decidere il passo successivo:
+        {riepilogo_trace}
+        """
+        testo_base = testo_base + contesto_trace
 
-        prompt_aggiornato = SystemMessage(content=testo + "\n" + contesto_trace)
-        messaggi_da_inviare = [prompt_aggiornato] + messaggi
+    prompt_finale = SystemMessage(content=testo_base)
+
+    if not messaggi:
+        # Prima entrata o inizio rigenerazione
+        messaggi_da_inviare = [
+            prompt_finale,
+            HumanMessage(content=f"Inizia la ricerca per il topic: {topic}"),
+        ]
+    else:
+        # Ciclo ReAct in corso
+        messaggi_da_inviare = [prompt_finale] + messaggi
 
     risposta_llm = llm_con_tools.invoke(messaggi_da_inviare)
 
-    return {"messages": [risposta_llm], "nodo_chiamante": "research"}
+    return {
+        "messages": [risposta_llm],
+        "nodo_chiamante": "research",
+    }
 
 
 def validator_node(state: Blog_Cucina):
     print("\n--- [NODO 3: VALIDATORE (Fact-Checking Incrociato)] ---")
     topic = state["topic_corrente"]
-    tracce_di_ragionamento = state.get("reasoning_trace", [])
+    ragionamento = state.get("reasoning_trace")
+    riflessioni_research = [r for r in ragionamento if r.startswith("[RESEARCH]")]
     dati_db_locale = state.get("rag_documents", [])
     dati_web_grezzi = state.get("web_documents", [])
     messaggi = state.get("messages", [])
@@ -651,35 +786,32 @@ def validator_node(state: Blog_Cucina):
     if not messaggi:
 
         prompt_riflessione = f"""
-        Sei un validatore esperto di ricettari e un risolutore di dipendenze. 
+        Sei un Validatore Supremo esperto di ricettari e un rigoroso risolutore di dipendenze. 
         Ti sono stati forniti ESATTAMENTE {totale_doc} documenti in totale (tra DB locale e WEB).
 
-        === L'ALGORITMO DI VALIDAZIONE (DA SEGUIRE PASSO PASSO) ===
-        Nel tuo ragionamento ('think_tool'), devi eseguire RIGOROSAMENTE queste 3 fasi in ordine cronologico:
+        🚨 ALLERTA ROSSA: QUESTA È L'UNICA INTERAZIONE CHE AVRAI. NON CI SARÀ NESSUN "PROSSIMO TURNO".
+        DEVI ESEGUIRE TUTTE E 3 LE FASI ORA, ALL'INTERNO DI QUESTA SINGOLA CHIAMATA AL TOOL.
+        USARE "STATO: CONTINUO" È UN ERRORE FATALE CHE COMPROMETTERÀ IL SISTEMA.
 
-        ▶ FASE 1: ELEZIONE DELLA RICETTA PRINCIPALE
-        - Cerca tra i documenti tutti quelli che descrivono il topic principale: '{topic}'.
-        - Se trovi più versioni per '{topic}', confronta i loro punteggi (score web) o l'autorevolezza.
-        - Eleggi la versione MIGLIORE IN ASSOLUTO. Questa diventa la "Ricetta Madre".
-        - Assegna SCORE 1 alla Ricetta Madre.
-        - Assegna SCORE 0 a tutte le altre versioni scartate (duplicati inferiori).
+        Compila i 3 campi del `think_tool` SEGUENDO TASSATIVAMENTE QUESTE ISTRUZIONI:
 
-        ▶ FASE 2: ANALISI DELLE DIPENDENZE
-        - Leggi attentamente gli ingredienti e il procedimento ESCLUSIVAMENTE della "Ricetta Madre" 
-            appena eletta e i tuoi vecchi ragionamenti '{tracce_di_ragionamento}' per TROVARE ed ESTRARRE le sue eventuali SOTTORICETTE.
-        - Dichiara chiaramente quali sono le sottoricette richieste per questa specifica preparazione.
+        ▶ NEL CAMPO 'analisi_contesto' (ESEGUI FASE 1 e FASE 2 INSIEME ADESSO):
+            - Confronta TUTTI i documenti che trattano '{topic}'.
+           - Eleggi il MIGLIORE come "Ricetta Madre" (assegnali SCORE 1) in base al punteggio o all'autorevolezza.
+           - Assegna SCORE 0 a tutti gli altri documenti che parlano di '{topic}' (sono duplicati inferiori).
+           - Analizzando i tuoi ragionamenti precedenti {riflessioni_research} individua le sottoricette che sono strettamente necessarie per realizzarla (non citare gli ingredienti).
 
-        ▶ FASE 3: VALIDAZIONE A CASCATA (FILTRO SOTTORICETTE)
-        - Ora valuta tutti i restanti documenti.
-        - SE un documento descrive una Sottoricetta Necessaria (individuata nella Fase 2):
-            - Se è unica, assegnale SCORE 1.
-            - Se ci sono più versioni della stessa sottoricetta, eleggi la migliore (assegnando SCORE 1 alla vincitrice e SCORE 0 ai duplicati).
-        - SE un documento descrive un piatto irrilevante OPPURE una sottoricetta NON richiesta dalla Ricetta Madre (es. il documento descrive un "Brodo", ma la Ricetta Madre eletta non usa brodo): assegna TASSATIVAMENTE SCORE 0.
+        ▶ NEL CAMPO 'valutazione_opzioni' (ESEGUI FASE 3 ADESSO):
+        - Prendi i documenti RIMASTI (quelli non ancora eletti o scartati).  - 
+           - SE il documento è una sottoricetta della ricetta madre: ASSEGNA Score 1 al migliore e scarta gli altri assegandoli Score 0(sono duplicati inferiori).
+           - SE il documento è irrilevante,fuori tema o non serve: assegna SCORE 0.
 
-        === FORMATO OUTPUT OBBLIGATORIO NEL RAGIONAMENTO ===
-        Il tuo ragionamento finale DEVE contenere ESATTAMENTE {totale_doc} righe di valutazione. Non saltare o accorpare nessun documento.
-        Per ogni documento scrivi esattamente così:
-        - ID_DOC [TITOLO ESTRATTO]: Score X - Motivo: ... (es. "Eletta come Ricetta Madre", "Sottoricetta necessaria per la Ricetta Madre", "Scartata perché duplicato inferiore", "Scartata perché non richiesta dalla Ricetta Madre").
+        ▶ NEL CAMPO 'decisione_finale' (VERDETTO FINALE):
+        - Scrivi la LISTA FISICA ED ESATTA delle tue valutazioni.
+        - L'elenco DEVE contenere ESATTAMENTE {totale_doc} righe (una per ogni documento che ti ho fornito).
+        - Formato obbligatorio per ogni riga:
+          ID_DOC [TITOLO]: Score X - Motivo: ...
+        - Dopo aver scritto l'elenco completo, DEVI CONCLUDERE TASSATIVAMENTE CON: "STATO: FINITO".
 
         === DOCUMENTI DA VALUTARE ===
         [DB LOCALE]
@@ -687,9 +819,6 @@ def validator_node(state: Blog_Cucina):
 
         [WEB]
         {testo_web}
-
-        Concludi con:
-        STATO: FINITO
         """
         messaggio = [
             SystemMessage(content=prompt_riflessione),
@@ -710,16 +839,20 @@ def validator_node(state: Blog_Cucina):
             break
 
     prompt_verdetto = f"""
-    Sulla base di questa tua analisi logica:
-    {riflessione_testo}
+        Sulla base esclusiva di questa tua analisi logica appena effettuata:
+        {riflessione_testo}
 
-    Produci il verdetto strutturato per '{topic}'.
-    ATTENZIONE (CRITICO): Devi estrarre e mappare TUTTI i documenti a cui hai assegnato SCORE 1 nella tua analisi.
-    Puoi (e DEVI) approvare UNO O PIÙ  documenti (sia DB che Web) se uno rappresenta la Ricetta Madre e gli altri sono le Sottoricette necessarie.
-    Nel caso in cui nessun documento riceva score 1 , i dati sono tutti inconsistenti per scrivere il post.
-    - is_valid: True se i dati totali approvati sono sufficienti per scrivere il post.
-    - usa_db_locale: True se almeno un documento del DB è stato approvato (Score 1).
-    """
+        Produci il verdetto strutturato finale per il topic '{topic}'.
+        
+        ATTENZIONE (CRITICO): 
+        1. Devi estrarre e mappare TUTTI i documenti a cui hai assegnato SCORE 1 nella tua analisi.
+        2. Usa gli STESSI IDENTICI ID_DOC (i numeri esatti) che hai scritto nell'analisi. È severamente vietato inventare ID non presenti nel testo.
+        3. Puoi (e DEVI) approvare UNO O PIÙ documenti (sia DB che Web) se uno rappresenta la Ricetta Madre e gli altri sono le Sottoricette necessarie.
+        
+        Regole per i flag:
+        - is_valid: True SE E SOLO SE i dati totali approvati (Score 1) sono sufficienti e coerenti per scrivere il post. Se nessun documento ha score 1, imposta a False.
+        - usa_db_locale: True se almeno UN documento proveniente dal DB locale è stato approvato (Score 1).
+        """
     esito = llm.with_structured_output(ValidationResult).invoke(
         [HumanMessage(content=prompt_verdetto)]
     )
@@ -823,70 +956,177 @@ def writer_node(state):
     dati_db_locale = state.get("approved_db_documents", [])
     dati_web = state.get("approved_web_documents", [])
     feedback = state.get("human_feedback", "")
+    post_precedente = state.get("post_draft", "")
 
-    # Sfruttiamo il tuo reducer (operator.add) che ha già accumulato i pensieri
     lista_tracce = state.get("reasoning_trace", [])
+    traces_formattate = (
+        "\n".join([f"- {t}" for t in lista_tracce])
+        if lista_tracce
+        else "Nessuna traccia di ragionamento precedente registrata."
+    )
 
-    if lista_tracce:
-        traces_formattate = "\n".join([f"- {t}" for t in lista_tracce])
-    else:
-        traces_formattate = "Nessuna traccia di ragionamento precedente registrata."
-
-    # Consolidiamo i testi delle fonti approvate dal Validatore
     testi_approvati = "\n\n".join(dati_db_locale + dati_web)
     if not testi_approvati.strip():
         testi_approvati = "ERRORE: Nessun documento approvato dal Validatore."
 
-    istruzione_correzione = (
-        f"\n MODIFICHE PRIORITARIE RICHIESTE DAL REDATTORE:\n{feedback}\n"
-        if feedback
-        else ""
-    )
+    try:
+        contesto_kg = kg_client.get_contesto_editoriale(topic)
 
-    prompt = f"""
-    Sei un Food Blogger professionista e un Redattore Editoriale senior.
-    Il tuo compito è scrivere la bozza finale strutturata per l'articolo: '{topic}' (definita come RICETTA MADRE).
+        style = contesto_kg.get("style", {})
+        claim_correlati = contesto_kg.get("claim_correlati", [])
+        topic_correlati = contesto_kg.get("topic_correlati", [])
 
-    Per farlo, ti vengono forniti due asset fondamentali che costituiscono il tuo unico perimetro di verità:
-    1. I TESTI APPROVATI: I documenti testuali contenenti la ricetta madre e le sottoricette.
-    2. LE TRACCE DI RAGIONAMENTO: L'analisi logica che mostra come il sistema ha scomposto il piatto e risolto le dipendenze.
+        # Blocco stile
+        if style:
+            blocco_stile = (
+                f"Tono: {style.get('tono', 'n/d')}\n"
+                f"Registro: {style.get('registro', 'n/d')}\n"
+                f"Lunghezza target: {style.get('lunghezza', 'n/d')} parole\n"
+                f"Audience: {style.get('audience', 'n/d')}\n"
+                f"Note stilistiche: {style.get('note', '')}"
+            )
+        else:
+            blocco_stile = (
+                "Nessuna linea guida stilistica disponibile (primo post del blog)."
+            )
 
-    ========================================================================
-    CRITERI DI COMPILAZIONE TASSATIVI (ZERO ALLUCINAZIONI)
-    ========================================================================
-    1. RIGORE STRUTTURALE (COESIONE RICETTA -> SOTTORICETTE):
-       - Il tuo output deve rispecchiare fedelmente l'albero delle dipendenze stabilito nelle tracce di ragionamento.
-       - Se il ragionamento precedente indica che un ingrediente (es. Besciamella, Ragù) è una SOTTORICETTA autonoma da sviluppare, DEVI mapparla interamente nella lista delle 'sotto_ricette', estraendo i suoi ingredienti specifici dal testo della fonte.
-       - È SEVERAMENTE VIETATO lasciare una sottoricetta complessa descritta come semplice stringa piatta negli ingredienti diretti della ricetta madre.
+        # Blocco claim dei post precedenti
+        if claim_correlati:
+            righe_claim = []
+            for p in claim_correlati:
+                claims_str = " | ".join(p["claims"][:3])
+                righe_claim.append(f"  • [{p['topic']}]: {claims_str}")
+            blocco_claim = "\n".join(righe_claim)
+        else:
+            blocco_claim = (
+                "Nessun post precedente nel Knowledge Graph (primo post del blog)."
+            )
 
-    2. VINCOLO DI ANCHORING METRICOTESTUALE:
-       - Estrai dosi, pesi, ingredienti e passaggi ESCLUSIVAMENTE dai testi approvati forniti. 
-       - Non inventare ingredienti accessori, non arrotondare le dosi e non inserire passaggi non scritti nei documenti.
-       - Se un ingrediente manca di quantità nel testo, scrivi "q.b." o "quantità non specificata" come da fonte.
+        # Blocco topic correlati per ingredienti condivisi
+        if topic_correlati:
+            righe_correlati = []
+            for c in topic_correlati:
+                ing_str = ", ".join(c["ingredienti_comuni"])
+                righe_correlati.append(
+                    f"  • '{c['topic']}' (ingredienti in comune: {ing_str})"
+                )
+            blocco_correlati = "\n".join(righe_correlati)
+        else:
+            blocco_correlati = "Nessun topic correlato trovato nel Knowledge Graph."
 
-    3. REGOLA ANTI-SOPRASTRUTTURE PER CONDIMENTI:
-       - Non creare oggetti SottoRicetta per ingredienti pronti o topping che non subiscono una trasformazione termica o meccanica congiunta (es. parmigiano grattugiato da spolverare, prosciutto pronto). Questi vanno inseriti negli ingredienti diretti.
+        print(
+            f"[WRITER] KG: stile={'ok' if style else 'vuoto'} | "
+            f"claim_post={len(claim_correlati)} | correlati={len(topic_correlati)}"
+        )
 
-    4. DETTAGLIO DELLA PREPARAZIONE:
-       - Genera l'elenco dei passaggi ('preparazione') in modo esteso, analitico e sequenziale. Non riassumere i procedimenti complessi in un solo paragrafo. Ogni passaggio deve essere una stringa chiara e indipendente nella lista.
-    {istruzione_correzione}
-    
-    ========================================================================
-    CONTESTO E FONTI PER LA COMPILAZIONE
-    ========================================================================
-    
-    [TRACCE DI RAGIONAMENTO PRECEDENTE (LOG DEL GRAPH STATE)]
-    {traces_formattate}
+    except Exception as e:
+        print(f"[WRITER] Errore recupero KG: {e}. Procedo senza contesto editoriale.")
+        blocco_stile = "Contesto stilistico non disponibile."
+        blocco_claim = "Claim precedenti non disponibili."
+        blocco_correlati = "Topic correlati non disponibili."
 
-    [TESTI DELLE FONTI APPROVATE (RICETTA MADRE + SOTTORICETTE)]
-    {testi_approvati}
+    # ── Blocco modifica (solo se l'utente ha richiesto correzioni) ────────────
+    if feedback:
+        blocco_modifica = f"""
+        ========================================================================
+        MODALITÀ MODIFICA — ISTRUZIONI PRIORITARIE
+        ========================================================================
+        Il post seguente è già stato generato ma il redattore ha richiesto modifiche.
+        Applica ESCLUSIVAMENTE le modifiche indicate, mantenendo intatte le parti non menzionate.
+        Rispetta comunque le linee guida stilistiche del blog indicate sopra.
+
+        MODIFICHE RICHIESTE:
+        {feedback}
+
+        POST PRECEDENTE DA MODIFICARE:
+        {post_precedente}
     """
+    else:
+        blocco_modifica = ""
 
-    # 3. Chiamata LLM Strutturata (Pydantic)
+    # ── Prompt finale ─────────────────────────────────────────────────────────
+    prompt = f"""
+        Sei il Redattore Editoriale senior di un blog di cucina siciliana.
+        Il tuo compito è scrivere la bozza finale strutturata per il post su: '{topic}'.
+
+        Ti vengono forniti tre asset che costituiscono il tuo perimetro di lavoro:
+        1. CONTESTO EDITORIALE DAL KNOWLEDGE GRAPH: lo stile del blog, i claim già
+        pubblicati e i topic correlati — per garantire coerenza e creare rimandi.
+        2. TESTI APPROVATI: i documenti con ricetta madre e sottoricette — la tua
+        unica fonte di verità per ingredienti, dosi e procedimenti.
+        3. TRACCE DI RAGIONAMENTO: il log dell'agente che ha scomposto il piatto
+        e risolto le dipendenze — ti dice cosa è una sottoricetta autonoma.
+
+        ========================================================================
+        CONTESTO EDITORIALE DAL KNOWLEDGE GRAPH
+        ========================================================================
+
+        [STILE DEL BLOG — rispetta queste linee guida in ogni scelta redazionale]
+        {blocco_stile}
+
+        [CLAIM GIÀ PUBBLICATI — richiamali esplicitamente se pertinenti, evita di ripeterli]
+        {blocco_claim}
+
+        [TOPIC CON INGREDIENTI IN COMUNE — puoi creare rimandi a questi post correlati]
+        {blocco_correlati}
+
+        ========================================================================
+        CRITERI DI COMPILAZIONE TASSATIVI
+        ========================================================================
+
+        1. COERENZA EDITORIALE (usa il contesto KG):
+        - Se un claim di un post precedente è pertinente al topic corrente, citalo
+            esplicitamente nell'introduzione o nei passaggi (es. "Come abbiamo visto
+            nel post sulla Besciamella..."). Non inventare rimandi: usa solo quelli
+            che trovi nel blocco CLAIM GIÀ PUBBLICATI.
+        - Se esiste un topic correlato (ingredienti in comune), puoi aggiungere
+            un breve rimando alla fine dell'introduzione (es. "Se ami questo piatto,
+            potresti trovare interessante anche la nostra ricetta di X").
+        - Rispetta SEMPRE il tono, il registro e la lunghezza target indicati
+            nelle linee guida stilistiche.
+
+        2. RIGORE STRUTTURALE (coesione ricetta → sottoricette):
+        - Il tuo output deve rispecchiare fedelmente l'albero delle dipendenze
+            stabilito nelle tracce di ragionamento.
+        - Se il ragionamento indica che un ingrediente (es. Besciamella, Ragù)
+            è una SOTTORICETTA autonoma, mappala interamente in 'sotto_ricette'
+            estraendo i suoi ingredienti dal testo della fonte.
+        - È VIETATO lasciare una sottoricetta complessa come stringa piatta
+            negli ingredienti diretti della ricetta madre.
+
+        3. ANCHORING METRICO-TESTUALE:
+        - Estrai dosi, pesi, ingredienti e passaggi ESCLUSIVAMENTE dai testi
+            approvati forniti. Non inventare ingredienti né arrotondare le dosi.
+        - Se un ingrediente manca di quantità nel testo, scrivi "q.b." o
+            "quantità non specificata".
+
+        4. REGOLA ANTI-SOPRASTRUTTURE:
+        - Non creare oggetti SottoRicetta per ingredienti pronti o topping che
+            non subiscono trasformazione (es. parmigiano da spolverare, prosciutto
+            pronto): questi vanno negli ingredienti diretti.
+
+        5. DETTAGLIO DELLA PREPARAZIONE:
+        - Elenca i passaggi in modo esteso, analitico e sequenziale.
+        - Ogni passaggio è una stringa chiara e indipendente nella lista.
+        - Non riassumere procedimenti complessi in un solo paragrafo.
+
+        ========================================================================
+        FONTI E RAGIONAMENTI
+        ========================================================================
+
+        [TRACCE DI RAGIONAMENTO (LOG DEL GRAPH STATE)]
+        {traces_formattate}
+
+        [TESTI DELLE FONTI APPROVATE (RICETTA MADRE + SOTTORICETTE)]
+        {testi_approvati}
+
+        {blocco_modifica}
+        """
+
     llm_writer = llm.with_structured_output(RecipeDraft)
     draft = llm_writer.invoke([HumanMessage(content=prompt)])
 
-    # 3. MIDDLEWARE DI PULIZIA PYTHON (DEDUPLICAZIONE LOGICA BINDING)
+    # ── Middleware: deduplicazione sottoricette dagli ingredienti diretti ─────
     nomi_sottoricette = set()
     for sub in draft.sotto_ricette:
         nomi_sottoricette.add(sub.classe_astratta.lower())
@@ -894,9 +1134,7 @@ def writer_node(state):
 
     ingredienti_diretti_puliti = []
     for ing in draft.ingredienti_diretti:
-        ing_nome_basso = ing.nome.lower()
-        is_subrecipe = any(nome_sub in ing_nome_basso for nome_sub in nomi_sottoricette)
-        if not is_subrecipe:
+        if not any(nome_sub in ing.nome.lower() for nome_sub in nomi_sottoricette):
             ingredienti_diretti_puliti.append(ing)
 
     draft.ingredienti_diretti = ingredienti_diretti_puliti
@@ -905,12 +1143,12 @@ def writer_node(state):
     print(draft.model_dump())
     print("========================\n")
 
-    # 4. Generazione Markdown deterministica tramite la funzione esterna
     markdown_finale = genera_markdown_bozza(draft)
 
     return {
         "recipe_draft": draft,
         "post_draft": markdown_finale,
+        "human_feedback": None,
     }
 
 
@@ -930,17 +1168,50 @@ def human_review_node(state: Blog_Cucina):
 
         return Command(goto="kg_update")
 
+    elif feedback == "RIGENERA":
+        print("[HITL] Rigenerazione richiesta. Torno al research.")
+        messaggi_da_cancellare = [
+            RemoveMessage(id=m.id) for m in state.get("messages", [])
+        ]
+        return Command(
+            update={
+                "messages": messaggi_da_cancellare,
+                "is_rigenera": True,
+                "human_feedback": "",
+                "rag_documents": [None],  # grazie a replace_or_add
+                "web_documents": [None],
+                "approved_db_documents": [],
+                "approved_web_documents": [],
+            },
+            goto="research",
+        )
+
+    elif feedback.startswith("MODIFICA:"):
+        testo_feedback = feedback.replace("MODIFICA:", "").strip()
+        print(f"[HITL] Modifica richiesta: '{testo_feedback}'")
+        return Command(update={"human_feedback": testo_feedback}, goto="writer")
+
+    elif feedback == "SCARTA":
+        print("[HITL]  Post scartato dall'utente.")
+        return Command(
+            update={
+                "human_feedback": "",
+                "post_draft": "",
+            },
+            goto=END,
+        )
+
 
 def kg_update_node(state: Blog_Cucina):
     print("\n--- [NODO 6: KG UPDATE (Aggiornamento Memoria)] ---")
-
+    indice_corrente = state.get("indice_post_corrente", 0)
     draft = state.get("recipe_draft")
     if not draft:
         print("[ERRORE] Nessun recipe_draft trovato nello stato.")
         return {}
 
     topic_finale = state["topic_corrente"]
-    fonte = draft.fonte
+    fonte = draft.fonti
 
     # ==========================================
     # 1. ESTRAZIONE INGREDIENTI DIRETTI
@@ -1024,6 +1295,8 @@ def kg_update_node(state: Blog_Cucina):
             ingredienti_diretti=ingredienti_diretti,
             sotto_ricette=sotto_ricette,
             fonte=fonte,
+            testo_post=state.get("post_draft", ""),
+            llm=llm,
         )
 
         print("[NEO4J] Salvataggio completato.")
@@ -1031,5 +1304,13 @@ def kg_update_node(state: Blog_Cucina):
     except Exception as e:
         print(f"[ERRORE NEO4J] Si è verificato un problema durante il salvataggio: {e}")
 
-    return {}  # "indice_post_corrente":
-    # state["indice_post_corrente"] + 1}
+    return {
+        "indice_post_corrente": indice_corrente + 1,
+        "approved_db_documents": [],
+        "approved_web_documents": [],
+        "rag_documents": [None],
+        "web_documents": [None],
+        "is_valid": None,
+        "human_feedback": "",
+        "is_rigenera": False,
+    }

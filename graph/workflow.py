@@ -58,6 +58,7 @@ def smista_documenti_node(state: Blog_Cucina):
         "rag_documents": rag_docs,
         "web_documents": web_docs,
         "messages": messaggi_da_cancellare,
+        "is_rigenera": False,
     }
 
 
@@ -124,92 +125,68 @@ def estrai_piano_node(state: Blog_Cucina):
 def estrai_singolo_topic_node(state: Blog_Cucina):
     print("\n--- [NODO: ESTRAZIONE TOPIC / GESTIONE FEEDBACK] ---")
     storico_riflessioni = state.get("reasoning_trace", [])
-    feedback = state.get("human_feedback", "")
-    # =================================================================
-    # CASO 1: Override Umano
-    # =================================================================
-    if feedback:
-        print(f" -> Rilevato feedback umano: '{feedback}'")
-        prompt_feedback = f"""
-        L'utente ha richiesto una modifica manuale: "{feedback}".
-        Estrai il nome del nuovo piatto, assegnali la categoria corretta e lascia la giustificazione vuota.
-        """
-
-        llm_estrazione = llm.with_structured_output(TopicPianificato)
-        risultato = llm_estrazione.invoke(prompt_feedback)
-
-        print(
-            f" -> [Override Umano] Topic: {risultato.topic} | Categoria: {risultato.categoria}"
-        )
-
-        return {
-            "topic_corrente": risultato.topic,
-            "human_feedback": "",
-        }
-
+    topic_iniziale = state.get(
+        "topic_corrente"
+    )  # Questo è quello chiesto/estratto originariamente
     testo_ragionamenti = "\n".join(storico_riflessioni)
-    is_variante = (
-        "variante" in testo_ragionamenti.lower()
-        or "bloccato" in testo_ragionamenti.lower()
+
+    print(
+        " -> Lettura dei ragionamenti dell'agente per estrarre il topic definitivo..."
     )
 
+    # 1. ESTRAZIONE UNICA ED INFALLIBILE
+    prompt_estrazione = f"""
+    Leggi i seguenti log di ragionamento dell'agente editoriale.
+    Il tuo unico compito è trovare l'ULTIMO topic (piatto) che l'agente ha verificato con successo e ha deciso di pubblicare (quello associato all'ultimo "STATO: FINITO").
+    
+    Estrai:
+    1. Il topic (il nome esatto del piatto definitivo, es. "Pasta al pesto con parmigiano").
+    2. La categoria gastronomica.
+    3. La giustificazione (spiega brevemente perché l'agente ha scelto questo piatto).
+    
+    LOG DELL'AGENTE: 
+    {testo_ragionamenti}
+    """
+
+    llm_estrazione_singola = llm.with_structured_output(TopicPianificato)
+    risultato = llm_estrazione_singola.invoke(prompt_estrazione)
+    topic_finale = risultato.topic
+
+    if topic_iniziale and topic_finale:
+        if topic_iniziale.strip().lower() != topic_finale.strip().lower():
+            is_variante = True
+
     if is_variante:
-        print(" -> Rilevato duplicato storico. Estrazione della VARIANTE...")
-        prompt_estrazione = f"""
-        L'agente ha proposto una VARIANTE a causa di un duplicato.
-        Leggi i log ed estrai:
-        1. Il topic (la variante approvata).
-        2. La categoria gastronomica.
-        3. La giustificazione (spiega brevemente perché ha scelto questa variante).
-        LOG: {testo_ragionamenti}
-        
-        """
-
-        llm_estrazione_singola = llm.with_structured_output(TopicPianificato)
-        risultato = llm_estrazione_singola.invoke(prompt_estrazione)
-
         print(
-            f" -> [Estrazione] Topic: {risultato.topic} | Categoria: {risultato.categoria} | motivazione : {risultato.giustificazione}"
+            f" -> Rilevata deviazione! L'utente voleva '{topic_iniziale}', l'agente ha scelto '{topic_finale}'. Il router fermerà il flusso per l'umano."
         )
-
-        return {
-            "topic_corrente": risultato.topic,
-            "reasoning_trace": storico_riflessioni,
-            "richiede_variante": True,
-        }
-
     else:
-        print(" -> Topic originale approvato. Estrazione in corso...")
-        prompt_estrazione = f"""
-        L'agente ha approvato il topic originale.
-        Leggi i log ed estrai:
-        1. Il topic confermato.
-        2. La categoria gastronomica.
-        3. Lascia la giustificazione vuota.
-        LOG: {testo_ragionamenti}
-        """
-
-        llm_estrazione_singola = llm.with_structured_output(TopicPianificato)
-        risultato = llm_estrazione_singola.invoke(prompt_estrazione)
-        messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state["messages"]]
-
         print(
-            f" -> [Estrazione] Topic: {risultato.topic} | Categoria: {risultato.categoria}"
+            f" -> Topic originale '{topic_iniziale}' confermato e libero. Nessun duplicato rilevato."
         )
 
-        return {
-            "messages": messaggi_da_cancellare,
-            "topic_corrente": risultato.topic,
-            "reasoning_trace": storico_riflessioni,
-        }
+    # 3. PULIZIA MESSAGGI
+    messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state.get("messages", [])]
+
+    print(
+        f" -> [Estrazione Finale] Topic: {topic_finale} | Categoria: {risultato.categoria}"
+    )
+
+    return {
+        "messages": messaggi_da_cancellare,
+        "topic_corrente": topic_finale,  # Aggiorniamo il topic di stato con quello nuovo
+        "richiede_variante": is_variante,
+        "human_feedback": None,
+    }
 
 
 def router_dopo_estrazione(
     state: Blog_Cucina,
 ) -> Literal["human_review_variante", "research"]:
     print("\n--- [ROUTER: CONTROLLO DUPLICATI / HITL] ---")
+    duplicato = state.get("richiede_variante")
 
-    if state.get("richiede_variante", False) == True:
+    if duplicato:
         print(
             " -> Rilevato DUPLICATO (Variante proposta). Invio a HUMAN_REVIEW_VARIANTE."
         )
@@ -342,16 +319,24 @@ def check_validation(state: Blog_Cucina):
         return "end_block"
 
 
-def altri_post_da_fare(state):
+def altri_post_da_fare(state: Blog_Cucina):
 
-    indice = state["indice_post_corrente"]
+    input = state.get("input_utente")
 
-    totale = len(state["piano_editoriale"])
+    if input == "PIANIFICAZIONE_AUTOMATICA":
 
-    if indice < totale:
-        return "research"
+        indice = state["indice_post_corrente"]
 
-    return END
+        totale = len(state["piano_editoriale"].sequenza_post)
+
+        if indice < totale:
+            return "research"
+
+        return END
+
+    else:
+
+        return END
 
 
 builder = StateGraph(Blog_Cucina)
@@ -433,8 +418,16 @@ builder.add_edge("writer", "human_review")
 # L'arco condizionale del feedback umano (Loop di Correzione)
 
 
-# Dal salvataggio andiamo alla fine
-builder.add_edge("kg_update", END)
+# Dal salvataggio andiamo alla fine o al research
+builder.add_conditional_edges(
+    "kg_update",
+    altri_post_da_fare,
+    {
+        "research": "research",
+        END: END,
+    },
+)
+
 memoria_temporanea = InMemorySaver()
 app = builder.compile(checkpointer=memoria_temporanea)
 
