@@ -124,57 +124,110 @@ def estrai_piano_node(state: Blog_Cucina):
 
 def estrai_singolo_topic_node(state: Blog_Cucina):
     print("\n--- [NODO: ESTRAZIONE TOPIC / GESTIONE FEEDBACK] ---")
+    is_variante = False
+    input_utente = state.get("input_utente")
     storico_riflessioni = state.get("reasoning_trace", [])
-    topic_iniziale = state.get(
-        "topic_corrente"
-    )  # Questo è quello chiesto/estratto originariamente
     testo_ragionamenti = "\n".join(storico_riflessioni)
+    topic_iniziale = state.get("topic_corrente")
+    feedback = state.get("human_feedback", "")
+    messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state.get("messages", [])]
 
-    print(
-        " -> Lettura dei ragionamenti dell'agente per estrarre il topic definitivo..."
-    )
+    # ══════════════════════════════════════════════════════════════════
+    # CASO A — MODIFICA UMANA DIRETTA
+    # L'utente ha scritto istruzioni libere in human_review_variante.
+    # Non leggiamo i reasoning_trace: l'utente ha già detto cosa vuole.
+    # ══════════════════════════════════════════════════════════════════
+    if feedback and feedback.startswith("modifica:"):
 
-    # 1. ESTRAZIONE UNICA ED INFALLIBILE
-    prompt_estrazione = f"""
+        istruzioni = feedback.replace("modifica:", "").strip()
+        topic_da_modificare = state.get("topic_corrente", "")
+        print(f" -> [CASO A] Modifica '{istruzioni}' su '{topic_da_modificare}'")
+
+        prompt = f"""
+            Il planner ha elaborato una richiesta di modifica del topic '{topic_da_modificare}'.
+            La modifica richiesta era: "{istruzioni}".
+            Leggi i log e trova l'ULTIMO topic che l'agente ha verificato con "STATO: FINITO".
+            Questo topic deve riflettere la modifica richiesta applicata a '{topic_da_modificare}'.
+            Estrai: topic (nome esatto del piatto), categoria gastronomica, giustificazione breve.
+            LOG: {testo_ragionamenti}
+            """
+        risultato = llm.with_structured_output(TopicPianificato).invoke(prompt)
+
+        print(
+            f" -> [Override] Topic: {risultato.topic} | Categoria: {risultato.categoria}"
+        )
+        return {
+            "messages": messaggi_da_cancellare,
+            "topic_corrente": risultato.topic,
+            "richiede_variante": True,
+            "human_feedback": None,
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # CASO B — RIGENERA
+    # Il planner ha già aggiunto il topic alla blacklist in human_review_variante
+    # e ha impostato human_feedback = "rigenera".
+    # Qui il reasoning_trace contiene il nuovo topic proposto dall'agente.
+    # ══════════════════════════════════════════════════════════════════
+    if feedback and feedback == "rigenera":
+        print(
+            " -> [CASO B] Rigenerazione: estrazione nuovo topic dai reasoning_trace..."
+        )
+
+        prompt = f"""
+        Il planner ha rigenerato un topic dopo un rifiuto umano.
+        Leggi i log e trova l'ULTIMO topic che l'agente ha verificato con "STATO: FINITO".
+        Estrai: topic, categoria, giustificazione.
+        LOG: {testo_ragionamenti}
+        """
+        risultato = llm.with_structured_output(TopicPianificato).invoke(prompt)
+
+        print(
+            f" -> [Rigenera] Nuovo topic: {risultato.topic} | Categoria: {risultato.categoria}"
+        )
+        return {
+            "messages": messaggi_da_cancellare,
+            "topic_corrente": risultato.topic,
+            "richiede_variante": True,
+            "human_feedback": None,
+        }
+
+    # ══════════════════════════════════════════════════════════════════
+    # CASO C — FLUSSO NORMALE
+    # Il planner ha terminato autonomamente (STATO: FINITO).
+    # Leggiamo i trace per capire cosa ha deciso.
+    # ══════════════════════════════════════════════════════════════════
+    print(" -> [CASO C] Flusso normale: estrazione topic dai reasoning_trace...")
+    topic_originale_attuale = state.get("topic_originale", "")
+    prompt = f"""
     Leggi i seguenti log di ragionamento dell'agente editoriale.
-    Il tuo unico compito è trovare l'ULTIMO topic (piatto) che l'agente ha verificato con successo e ha deciso di pubblicare (quello associato all'ultimo "STATO: FINITO").
-    
-    Estrai:
-    1. Il topic (il nome esatto del piatto definitivo, es. "Pasta al pesto con parmigiano").
-    2. La categoria gastronomica.
-    3. La giustificazione (spiega brevemente perché l'agente ha scelto questo piatto).
-    
-    LOG DELL'AGENTE: 
-    {testo_ragionamenti}
+    Trova l'ULTIMO topic che l'agente ha verificato con successo (associato all'ultimo "STATO: FINITO").
+    Estrai: topic (nome esatto del piatto), categoria gastronomica, giustificazione breve.
+    LOG: {testo_ragionamenti}
     """
-
-    llm_estrazione_singola = llm.with_structured_output(TopicPianificato)
-    risultato = llm_estrazione_singola.invoke(prompt_estrazione)
+    risultato = llm.with_structured_output(TopicPianificato).invoke(prompt)
     topic_finale = risultato.topic
 
+    # Confronto robusto: l'agente ha deviato dal topic richiesto dall'utente?
     if topic_iniziale and topic_finale:
         if topic_iniziale.strip().lower() != topic_finale.strip().lower():
             is_variante = True
+            print(
+                f" -> Deviazione rilevata: utente voleva '{topic_iniziale}', "
+                f"agente ha scelto '{topic_finale}'. Mando a HUMAN_REVIEW_VARIANTE."
+            )
+        else:
+            print(
+                f" -> Topic '{topic_finale}' confermato, nessun duplicato. Vado in RESEARCH."
+            )
 
-    if is_variante:
-        print(
-            f" -> Rilevata deviazione! L'utente voleva '{topic_iniziale}', l'agente ha scelto '{topic_finale}'. Il router fermerà il flusso per l'umano."
-        )
-    else:
-        print(
-            f" -> Topic originale '{topic_iniziale}' confermato e libero. Nessun duplicato rilevato."
-        )
-
-    # 3. PULIZIA MESSAGGI
-    messaggi_da_cancellare = [RemoveMessage(id=m.id) for m in state.get("messages", [])]
-
-    print(
-        f" -> [Estrazione Finale] Topic: {topic_finale} | Categoria: {risultato.categoria}"
-    )
-
+    print(f" -> [Estrazione] Topic: {topic_finale} | Categoria: {risultato.categoria}")
     return {
         "messages": messaggi_da_cancellare,
-        "topic_corrente": topic_finale,  # Aggiorniamo il topic di stato con quello nuovo
+        "topic_corrente": topic_finale,
+        "topic_originale": (
+            topic_originale_attuale if topic_originale_attuale else topic_iniziale
+        ),
         "richiede_variante": is_variante,
         "human_feedback": None,
     }
@@ -185,7 +238,7 @@ def router_dopo_estrazione(
 ) -> Literal["human_review_variante", "research"]:
     print("\n--- [ROUTER: CONTROLLO DUPLICATI / HITL] ---")
     duplicato = state.get("richiede_variante")
-
+    print(f"{duplicato}")
     if duplicato:
         print(
             " -> Rilevato DUPLICATO (Variante proposta). Invio a HUMAN_REVIEW_VARIANTE."

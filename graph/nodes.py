@@ -27,6 +27,8 @@ def planner_node(state: Blog_Cucina):
 
     print("\n--- [NODO 1: PLANNER (LLM)] ---")
     input = state["input_utente"]
+    topic_originale = state.get("topic_originale", "")
+    topic = state.get("topic_corrente", "")
     messaggi = state["messages"]
     feedback = state.get("human_feedback")
 
@@ -73,7 +75,8 @@ def planner_node(state: Blog_Cucina):
     - ✅ CORRETTO: "Pollo al limone"
     - ✅ CORRETTO: "Verdure grigliate"
     - ✅ CORRETTO: "Filetto di manzo al pepe verde"
-    - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
+    
+    [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
     
     """
 
@@ -109,7 +112,7 @@ def planner_node(state: Blog_Cucina):
               - ✅ CORRETTO: "Verdure grigliate"
               - ✅ CORRETTO: "Filetto di manzo al pepe verde"
             
-            [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE pianificare internamente.
+           [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
         
                         """
 
@@ -157,7 +160,7 @@ def planner_node(state: Blog_Cucina):
             - ✅ CORRETTO: "Filetto di manzo al pepe verde"
             - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
             
-            [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE pianificare internamente.
+            [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
             """
 
         prompt = SystemMessage(content=testo_prompt)
@@ -168,9 +171,7 @@ def planner_node(state: Blog_Cucina):
 
     REGOLE DEL FLUSSO AUTONOMO E RISOLUZIONE CONFLITTI (ReAct):
      FASE 1. VERIFICA INIZIALE: Usa SEMPRE `controlla_storico_post` per verificare se la direttiva dell'utente è già stata pubblicata.
-       APPENA RICEVI LA RISPOSTA DEL TOOL, prima di fare qualsiasi altra cosa o chiamare altri tool di ricerca, DEVI chiamare il `think_tool`.
-        
-    
+             APPENA RICEVI LA RISPOSTA DEL TOOL, DEVI chiamare il `think_tool` e dichiarare il risultato (OK o BLOCCATO). Solo dopo puoi procedere.
     
      FASE 2. PROCEDURA Di RAGIONAMENTO  (SEGUI ALLA LETTERA):
        se il database risponde "OK" la direttiva dell'utente non è ancora stata pubblicata. Non hai bisogno di proporre varianti. Vai direttamente alla FASE 3
@@ -186,8 +187,8 @@ def planner_node(state: Blog_Cucina):
     
 
      FASE 3. CONCLUSIONE:
-       - Solo quando avrai ottenuto un "OK" , il topic che hai generato andrà bene e  potrai concludere.
-       - Termina scrivendo: "STATO: FINITO".
+       -Solo quando avrai ottenuto un "OK" per un topic, termina con "STATO: FINITO".
+       + Nota: Il topic verrà comunque sottoposto all'approvazione dell'utente, ma il tuo compito è terminato..
        
         --- FORMATO DEI TOPIC (REGOLA FERREA) ---
             - Singola Preparazione: Il topic deve essere una ricetta reale, specifica e SINGOLA. 
@@ -199,7 +200,7 @@ def planner_node(state: Blog_Cucina):
               - ✅ CORRETTO: "Verdure grigliate"
               - ✅ CORRETTO: "Filetto di manzo al pepe verde"
             
-            [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE proporre il topic in caso di duplicato.
+    [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
     """
 
         # 2. GESTIONE DEL FEEDBACK: RIGENERA TOTALE CON BLACKLIST
@@ -208,7 +209,7 @@ def planner_node(state: Blog_Cucina):
             testo_prompt += f"""
             
             --- FEEDBACK UTENTE (PROPOSTA SINGOLA RIFIUTATA) ---
-            ATTENZIONE: La tua idea precedente è stata BOCCIATA e si trova debtro la  {blacklist} . 
+            ATTENZIONE: La tua idea precedente è stata BOCCIATA e si trova dentro la  {blacklist} . 
             
             REGOLA ASSOLUTA: NON PROPORRE NESSUNO DI QUESTI TOPIC SCARTATI NELLA TUA BLACKLIST perche l'utente li ha bocciati:
             [{blacklist}]
@@ -217,9 +218,10 @@ def planner_node(state: Blog_Cucina):
             
             --- REGOLE DI WORKFLOW PER LA RIGENERAZIONE ---
             1. Nel tuo PRIMO utilizzo del `think_tool`, dichiara di aver ricevuto il feedback negativo e menziona la blacklist che eviterai a tutti i costi.
-            2. Usa `controlla_storico_post` per verificare ESCLUSIVAMENTE 2la tua NUOVA idea.
-            3. Se risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti.
-            4. 🚨 REGOLA DI STOP: Appena ricevi un "OK" definitivo, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO".
+            2. Considera varianti o nuove ricette relative al: "{topic_originale}" che era il topic iniziale proposto dall'utente ma che è risultata già pubblicato.
+            3. Usa `controlla_storico_post` per verificare ESCLUSIVAMENTE la tua NUOVA idea.
+            4. Se risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti.
+            5. 🚨 REGOLA DI STOP: Appena ricevi un "OK" definitivo, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO".
             
             
             
@@ -229,11 +231,13 @@ def planner_node(state: Blog_Cucina):
             - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
             - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
             - ❌ SBAGLIATO (VIETATO): "primo a base di pesce"
+            - ❌ SBAGLIATO (VIETATO): provare a riproporre "{topic_originale}"essendo un duplicato.
             - ✅ CORRETTO: "Pollo al limone"
             - ✅ CORRETTO: "Verdure grigliate"
             - ✅ CORRETTO: "Filetto di manzo al pepe verde"
             - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
-            non devi mai proporre nessuno di questi topic [{blacklist}]!!
+            non devi mai proporre nessuno di questi topic [{blacklist}] e "{topic_originale}"!!
+            [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
             """
 
         # 3. GESTIONE DEL FEEDBACK: MODIFICA GUIDATA
@@ -248,35 +252,32 @@ def planner_node(state: Blog_Cucina):
             testo_prompt += f"""
             
             --- FEEDBACK UTENTE (RICHIESTA DI MODIFICA) ---
-            L'utente ha richiesto le seguenti MODIFICHE SPECIFICHE alla tua singola proposta: 
-            "{istruzioni}"
-            
-            
-            
-            REGOLA MATEMATICA E LOGICA ASSOLUTA:
-            1. Analizza la richiesta dell'utente: identifica COSA l'utente vuole cambiare rispetto alla proposta scartata.
-            2. Il NUOVO topic generato DEVE RISPETTARE ALLA LETTERA l'istruzione di modifica richiesta dall'utente.
-            3. NON PROPORRE MAI i seguenti topic: {blacklist}.
-            4. Alla fine del processo, devi avere rigorosamente 1 singolo topic approvato.
-            
-            --- REGOLE DI WORKFLOW PER LA MODIFICA ---
-            1. Nel tuo PRIMO `think_tool`, dichiara: qual era il topic scartato e quale nuova strada hai deciso di intraprendere basandoti sulle istruzioni dell'utente.
-            2. Usa `controlla_storico_post` SOLO per verificare il NUOVO topic che stai introducendo.
-            3. Se il nuovo topic risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti (usa `get_ingredienti` e poi ragiona su Variante o Ricetta Simile).
-            4. 🚨 REGOLA DI STOP (IMPORTANTISSIMA): Appena ricevi un "OK" definitivo dal database per la tua nuova proposta, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO". È severamente vietato proporre idee aggiuntive o continuare a usare il think_tool.
-                        
-                                
-            # Formato dei topic (REGOLA FERREA)
-            - **Singola Preparazione:** Il topic deve essere una ricetta reale, specifica e SINGOLA. 
-            - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
-            - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
-            - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
-            - ❌ SBAGLIATO (VIETATO): "primo a base di pesce"
-            - ✅ CORRETTO: "Pollo al limone"
-            - ✅ CORRETTO: "Verdure grigliate"
-            - ✅ CORRETTO: "Filetto di manzo al pepe verde"
-            - NON cercare dati online o in locale. Il tuo compito è solo pianificare.          
-            [VINCOLO TASSATIVO]: NON cercare dati online o in locale. Il tuo compito è ESCLUSIVAMENTE pianificare internamente.
+            L'utente stava valutando il topic: "{topic}".
+            Ha richiesto questa modifica specifica: "{istruzioni}".
+ 
+            Il tuo obiettivo è trovare UN SOLO topic che applichi la modifica richiesta
+            a "{topic}". Ragiona sul topic di partenza e sull'istruzione,
+            poi proponi un nuovo nome di ricetta che le incorpori entrambe.
+            Esempio: topic "Insalata di carote e piselli" + istruzione "aggiungi la maionese"
+            → nuovo topic "Insalata di carote, piselli e maionese".
+ 
+            REGOLE ASSOLUTE:
+            1. Il NUOVO topic DEVE applicare "{istruzioni}" a "{topic}".
+            2. NON PROPORRE MAI: {blacklist} — già scartati dall'utente.
+            3. Alla fine devi avere esattamente 1 topic approvato.
+ 
+            --- WORKFLOW ---
+            1. Nel PRIMO `think_tool` dichiara: topic di partenza, modifica da applicare,
+               nuovo topic che hai deciso di proporre.
+            2. Usa `controlla_storico_post` SOLO per il NUOVO topic.
+            3. Se risulta "BLOCCATO": usa `get_ingredienti` e proponi una variante.
+            4. 🚨 STOP: al primo "OK" chiudi con "STATO: FINITO".
+ 
+            # Formato (REGOLA FERREA)
+            - Topic singolo e specifico — mai combinazioni con contorno.
+            - ❌ VIETATO: usare "{istruzioni}" direttamente come topic.
+            - ✅ CORRETTO: ricava un nome di piatto reale dalla modifica.
+        [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
             """
 
         prompt = SystemMessage(content=testo_prompt)
@@ -292,6 +293,7 @@ def planner_node(state: Blog_Cucina):
 
         # in base al feedback
         if "rigenera" in feedback:
+            print(f"{topic_originale}")
 
             # Distinguiamo tra pianificazione automatica e post singolo
             if input == "PIANIFICAZIONE_AUTOMATICA":
@@ -306,6 +308,10 @@ def planner_node(state: Blog_Cucina):
                 "⚠️ LA TUA PRIMA AZIONE IN ASSOLUTO DEVE ESSERE CHIAMARE IL `think_tool`.\n"
                 "Nel `think_tool` DEVI scrivere testualmente: 'Non proporrò i seguenti piatti "
                 f"perché sono nella blacklist: [{blacklist}]'.\n"
+                f"la proposta originale richiesto dall'utente era:'{topic_originale} "
+                "Devi restare nell'area semantica di questo piatto: proponi varianti o ricette"
+                "simili che condividono ingredienti principali o tecnica di preparazione. "
+                f"NON proporre MAI il topic originale stesso ('{topic_originale}') perché è già stato pubblicato"
                 f"Solo dopo aver scritto questo, puoi iniziare a elaborare {idee}.\n"
                 f"🚨 REGOLA DI STOP: {stop}, FERMATI IMMEDIATAMENTE con 'STATO: FINITO'."
             )
@@ -315,7 +321,10 @@ def planner_node(state: Blog_Cucina):
             if input == "PIANIFICAZIONE_AUTOMATICA":
                 idee = "1 NUOVO topic (mantenendo gli altri 2 del piano precedente)"
             else:
-                idee = "1 SOLO nuovo topic"
+                idee = (
+                    f"una versione modificata di '{topic}' "
+                    f"applicando questa istruzione: '{istruzioni}'"
+                )
 
             messaggio = (
                 "L'utente ha richiesto una modifica specifica.\n"
@@ -541,12 +550,13 @@ def human_review_variante(state: Blog_Cucina):
 
         print(" [NODO] Richiesta modifica ricevuta.")
 
-        if (
+        """ if (
             topic_proposto
             and topic_proposto != "None"
             and topic_proposto not in blacklist_attuale
         ):
             blacklist_attuale.append(topic_proposto)
+        """
 
         messaggi_da_cancellare = [
             RemoveMessage(id=m.id) for m in state.get("messages", [])
@@ -556,7 +566,6 @@ def human_review_variante(state: Blog_Cucina):
             update={
                 "human_feedback": f"modifica:{istruzioni}",
                 "blacklist_topics": blacklist_attuale,
-                "topic_corrente": None,
                 "messages": messaggi_da_cancellare,
             },
             goto="planner",

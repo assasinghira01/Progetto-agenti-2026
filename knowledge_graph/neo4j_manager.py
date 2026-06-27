@@ -36,9 +36,9 @@ class CucinaKnowledgeGraph:
     def init_blog_style(
         self,
         tono: str = "amichevole e appassionato",
-        registro: str = "informale ma preciso, ricco di aneddoti culturali siciliani",
+        registro: str = "informale ma preciso, ricco di aneddoti culturali",
         lunghezza_target: int = 600,
-        audience: str = "appassionati di cucina tradizionale siciliana, livello intermedio",
+        audience: str = "appassionati di cucina tradizionale, livello intermedio",
         note_stilistiche: str = (
             "Usa sempre la seconda persona singolare per coinvolgere il lettore. "
             "Includi almeno un rimando culturale o storico per ogni ricetta. "
@@ -56,7 +56,7 @@ class CucinaKnowledgeGraph:
         with self.driver.session() as session:
             session.run(
                 """
-                MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
+                MERGE (b:Blog { name: "Il mio Blog di Cucina" })
                 MERGE (s:BlogStyle { name: "stile_blog" })
                 SET s.tono              = $tono,
                     s.registro          = $registro,
@@ -201,7 +201,7 @@ class CucinaKnowledgeGraph:
         query_cypher = """
         CALL db.index.vector.queryNodes('recipe_embedding_index', 3, $vettore)
         YIELD node AS r, score
-        WHERE score > 0.88
+        WHERE score > 0.95
         MATCH (p:Post)-[:PARLA_DI]->(r)
         RETURN r.name AS piatto_trattato, p.titolo AS titolo_post, score
         ORDER BY score DESC

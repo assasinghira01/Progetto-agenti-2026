@@ -2,10 +2,10 @@
 La maionese è la salsa più utilizzata nella cucina internazionale, ed è presente anche in molte preparazioni italiane (insalate di riso, antipasti di pesce, condimenti). La versione italiana classica prevede solo tuorlo d'uovo, olio di semi, aceto o limone e sale. Il segreto: gli ingredienti a temperatura ambiente e l'aggiunta dell'olio a filo per emulsionare.
 
 ## Ingredienti (per circa 250 ml)
-- 1 tuorlo d'uovo (a temperatura ambiente)
-- 1 cucchiaino di senape (facoltativo, ma aiuta l'emulsione)
-- 200ml Olio di semi (girasole o arachide)
-- 1 cucchiaio di succo di limone (o aceto di vino bianco)
+- 1 tuorlo d'uovo 
+- 1 cucchiaino di senape 
+- 200ml Olio di semi 
+- 1 cucchiaio di succo di limone 
 - Sale (q.b.)
 
 ## Procedimento

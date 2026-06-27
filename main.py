@@ -20,7 +20,7 @@ def main():
     # Inizializziamo o carichiamo il database vettoriale locale
     popola_database_rag()
     inizializza_vector_store()
-    # kg_client.init_blog_style()
+    kg_client.init_blog_style()
 
     while True:
         print("\n=== MENU PRINCIPALE ===")

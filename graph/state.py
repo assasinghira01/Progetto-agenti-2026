@@ -13,11 +13,12 @@ def replace_or_add(old: list, new: list) -> list:
 
 class Blog_Cucina(MessagesState):
     input_utente: str
+    topic_originale: Optional[str] = None
     topic_corrente: Optional[str] = None
     nodo_chiamante: str
     reasoning_trace: Annotated[list[str], operator.add]
     blacklist_topics: list[str]
-    is_rigenera: Optional[bool] = False
+    richiede_variante: Optional[bool] = None
     kg_context: Annotated[List[str], operator.add]
     rag_documents: Annotated[List[str], replace_or_add]
     web_documents: Annotated[List[str], replace_or_add]
