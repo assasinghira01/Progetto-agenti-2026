@@ -86,7 +86,7 @@ def ottimizza_query_ricerca(query_originale: str) -> str:
 
     === REGOLE DI TRASFORMAZIONE ===
     1. SE la query indica esplicitamente una base PER un piatto finale (es. 'ragù per lasagne', 'besciamella per cannelloni', 'glassa per torta'), isola la base e rimuovi il piatto finale (es. diventa 'ricetta ragù di carne classico').
-    2. SE INVECE la query è il nome di un piatto completo, un dolce o una torta (es. 'Torta setteveli', 'Carbonara', 'Arancini'), MANTIENI il nome intatto senza rimuovere nulla.
+    2. SE INVECE la query è il nome di un piatto completo,  (es. 'ganache al cioccolato', 'lasagne al pesto','pizza capricciosa','insalata di quinoa'), MANTIENI il nome intatto senza rimuovere nulla.
     3. AGGIUNGI SEMPRE alla fine le parole "ricetta completa in italiano" per forzare i risultati.
 
     Rispondi SOLO con la query ottimizzata, senza commenti o virgolette.

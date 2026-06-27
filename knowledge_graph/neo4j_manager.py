@@ -261,7 +261,7 @@ class CucinaKnowledgeGraph:
         topic_finale: str,
         ingredienti_diretti: list | None = None,
         sotto_ricette: list | None = None,
-        fonte: str = "",
+        fonte: list[str] | None = None,
         testo_post: str = "",
         llm=None,
     ):
@@ -452,24 +452,18 @@ class CucinaKnowledgeGraph:
                 print(f"[NEO4J] " f"{len(sotto_ricette)} " f"sottoricette salvate.")
 
             if fonte:
-
-                session.run(
-                    """
-                    MATCH (p:Post {
-                        titolo: $titolo
-                    })
- 
-                    MERGE (f:Fonte {
-                        url: $fonte
-                    })
- 
+                for url in fonte:
+                    if url and url.strip():
+                        session.run(
+                            """
+                    MATCH (p:Post { titolo: $titolo })
+                    MERGE (f:Fonte { url: $url })
                     MERGE (p)-[:USA_FONTE]->(f)
                     """,
-                    titolo=titolo_post,
-                    fonte=fonte,
-                )
-
-                print(f"[NEO4J] Fonte registrata.")
+                            titolo=titolo_post,
+                            url=url.strip(),
+                        )
+                print(f"[NEO4J] {len(fonte)} fonti registrate.")
 
             # ==================================================
             # CLAIM — estratti dal testo del post tramite LLM

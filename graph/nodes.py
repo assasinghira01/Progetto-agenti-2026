@@ -65,16 +65,20 @@ def planner_node(state: Blog_Cucina):
 
     FASE 3 - GENERAZIONE DEL PIANO:
     SOLO DOPO aver ottenuto 3 risposte "OK" dal tool `controlla_storico_post`, puoi procedere a generare il testo finale del piano editoriale con i 3 topic approvati.
-
-    ## Formato dei topic (REGOLA FERREA)
-    - **Singola Preparazione:** Il topic deve essere una ricetta reale, specifica e SINGOLA. 
-    - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
-    - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
-    - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
-    - ❌ SBAGLIATO (VIETATO): "primo a base di pesce"
-    - ✅ CORRETTO: "Pollo al limone"
-    - ✅ CORRETTO: "Verdure grigliate"
-    - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+       ## Formato dei topic (REGOLA FERREA)
+            Il topic DEVE essere il nome ESPLETO di una ricetta reale e riconoscibile.
+            - È ASSOLUTAMENTE VIETATO ❌ combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+            - È VIETATO USARE nomi generici come "dolce", "antipasto", "primo", "contorno", ecc.
+            **Devi usare un nome specifico che identifichi un piatto preciso, ad esempio:**
+            - ❌ SBAGLIATO (VIETATO): "dolce al caffè" → usa "Tiramisù" o "Panna cotta al caffè"
+            - ❌ SBAGLIATO (VIETATO): "antipasto" → usa "Bruschette al pomodoro" o "Caprese"
+            - ❌ SBAGLIATO (VIETATO): "primo a base di pesce" → usa "Spaghetti alle vongole"
+            - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
+            - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
+            - ✅ CORRETTO: "Pollo al limone"
+            - ✅ CORRETTO: "Verdure grigliate"
+            - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+            - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
     
     [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
     
@@ -102,15 +106,21 @@ def planner_node(state: Blog_Cucina):
             4. Usa la dicitura "STATO: CONTINUO" finché non trovi 3 nuove idee approvate dal tool.
             5. Usa la dicitura "STATO: FINITO" solo alla fine, quando hai i 3 topic definitivi.
             
-            --- FORMATO DEI TOPIC (REGOLA FERREA) ---
-            - Singola Preparazione: Il topic deve essere una ricetta reale, specifica e SINGOLA. 
-            - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
-              - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
-              - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
-              - ❌ SBAGLIATO (VIETATO): "primo a base di pesce"
-              - ✅ CORRETTO: "Pollo al limone"
-              - ✅ CORRETTO: "Verdure grigliate"
-              - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+             ## Formato dei topic (REGOLA FERREA)
+            **Il topic DEVE essere il nome ESPLETO di una ricetta reale e riconoscibile.** 
+            - È ASSOLUTAMENTE VIETATO❌combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+            - **È VIETATO USARE nomi generici come "dolce", "antipasto", "primo", "contorno", ecc.**
+            **Devi usare un nome specifico che identifichi un piatto preciso, ad esempio:**
+            - ❌ SBAGLIATO (VIETATO): "dolce al caffè" → usa "Tiramisù" o "Panna cotta al caffè"
+            - ❌ SBAGLIATO (VIETATO): "antipasto" → usa "Bruschette al pomodoro" o "Caprese"
+            - ❌ SBAGLIATO (VIETATO): "primo a base di pesce" → usa "Spaghetti alle vongole"
+            - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
+            - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
+            - ❌ SBAGLIATO (VIETATO): "primo a base di pesce"
+            - ✅ CORRETTO: "Pollo al limone"
+            - ✅ CORRETTO: "Verdure grigliate"
+            - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+            - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
             
            [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
         
@@ -150,8 +160,13 @@ def planner_node(state: Blog_Cucina):
             
             
                     ## Formato dei topic (REGOLA FERREA)
-            - **Singola Preparazione:** Il topic deve essere una ricetta reale, specifica e SINGOLA. 
-            - È ASSOLUTAMENTE VIETATO combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+            **Il topic DEVE essere il nome ESPLETO di una ricetta reale e riconoscibile.** 
+            - È ASSOLUTAMENTE VIETATO ❌ combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
+            - **È VIETATO USARE nomi generici come "dolce", "antipasto", "primo", "contorno", ecc.**
+            **Devi usare un nome specifico che identifichi un piatto preciso, ad esempio:**
+            - ❌ SBAGLIATO (VIETATO): "dolce al caffè" → usa "Tiramisù" o "Panna cotta al caffè"
+            - ❌ SBAGLIATO (VIETATO): "antipasto" → usa "Bruschette al pomodoro" o "Caprese"
+            - ❌ SBAGLIATO (VIETATO): "primo a base di pesce" → usa "Spaghetti alle vongole"
             - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
             - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
             - ❌ SBAGLIATO (VIETATO): "primo a base di pesce"
@@ -581,26 +596,55 @@ def krag_research_node(state: Blog_Cucina):
     riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
     print(f"{topic}")
     messaggi = state.get("messages", [])
+    REGOLA_PRIORITA_FONTI = """
+    🚨 REGOLA D'ORO SULLA RICERCA DELLE SOTTORICETTE (VALE SEMPRE, LEGGI PRIMA DI TUTTO):
+    Per qualsiasi sottoricetta, le fonti hanno un ORDINE DI PRIORITÀ FISSO e NON
+    puoi mai saltarne una per andare alla successiva:
+
+    1. DB LOCALE — è la fonte di verità. Cerca sempre qui PRIMA.
+    2. RICETTA MADRE GIÀ IN MEMORIA — se il DB fallisce, PRIMA di cercare sul web
+    devi rileggere la Ricetta Madre. Se contiene GIÀ ingredienti E procedimento
+    chiari per quella sottoricetta, usa quelli: non serve altro.
+    3. WEB — usalo SOLO se sia il DB (1) sia la Ricetta Madre (2) non ti hanno
+    dato una sottoricetta completa.
+
+    🚫 È UN ERRORE saltare dal punto 1 al punto 3 senza aver fatto il punto 2.
+    """
 
     testo_base = f"""
+    {REGOLA_PRIORITA_FONTI}
     Sei un Agente Investigatore esperto, specializzato in recupero dati culinari. Il tuo obiettivo è raccogliere DATI per la ricetta completa per il topic: '{topic}' e TUTTE le sue eventuali sottoricette.
-    seguendo l'algoritmo. Solo quando avrai completato l'albero delle sottoricette di TUTTE le Ricette Madri potrai dichiarare "STATO: FINITO".
-    ---
+       
+        ### 🚨 IL TEST DELLA SOTTORICETTA (LEGGI PRIMA DI TUTTO IL RESTO)
+
+        Prima di astrarre QUALSIASI elemento come sottoricetta, applica SEMPRE questo test:
+        "Se preparassi questo elemento DA SOLO, senza il piatto principale, otterrei un
+        prodotto con un'identità culinaria propria che esiste anche fuori da questa ricetta?"
+
+        ✅ TEST SUPERATO (È una sottoricetta) — l'elemento subisce una TRASFORMAZIONE che lo
+        rende un prodotto nuovo, riconoscibile e nominabile da solo:
+        - Besciamella, Ragù, Maionese, Crema pasticcera, Pasta biscotto, Glassa, Pastella,
+        Brodo, Pesto, Salsa di pomodoro base.
+        - Caratteristica comune: richiede COTTURA, EMULSIONE o MONTATURA per esistere.
+
+        ❌ TEST FALLITO (NON è una sottoricetta, è un INGREDIENTE COMPOSTO o un PASSAGGIO) —
+        l'elemento è semplicemente un MIX di ingredienti crudi mescolati insieme, senza
+        trasformazione fisica o chimica significativa:
+        - Marinature (es. "marinatura con spezie", "marinatura al limone")
+        - Miscele di spezie o aromi crudi (es. "miscela di spezie", "mix di erbe")
+        - Panature (farina/uovo/pangrattato usati per impanare)
+        - Condimenti a crudo (es. olio e limone, salsa di soia e zenzero)
+        - Yogurt, formaggi, sfumature di vino, marinate, impanature
+
+        REGOLA OPERATIVA: se un elemento NON supera il test, NON chiamare `think_tool` per
+        "esplorarlo come sottoricetta". Trattalo SEMPRE come un ingrediente diretto (anche
+        se è composto da più elementi crudi mescolati) e passa OLTRE senza ulteriori ricerche.
+
+        ⚠️ ERRORE COMUNE DA EVITARE: NON ri-applicare il criterio deduttivo a un elemento che
+        hai già scartato. 
+
     ###  REGOLE GENERALI (LEGGI CON ATTENZIONE)
     
-            
-        ### CLASSIFICAZIONE PRELIMINARE DEL TOPIC (FONDAMENTALE)
-            Prima di applicare l'algoritmo, classifica mentalmente il topic in uno di questi tipi:
-
-            **TIPO A – RICETTA COMPLESSA CON SOTTORICETTE**  
-            Preparazioni che richiedono altre preparazioni  (es. lasagne,setteveli,insalata russa, ecc...).  
-            → Applica l'algoritmo ricorsivo completo.
-
-            **TIPO B – RICETTA SEMPLICE / ASSEMBLAGGIO**  
-            Piatti dove gli ingredienti vengono usati direttamente, al massimo con semplici operazioni di taglio, schiacciatura o miscelatura (es. bruschette, insalate, toast, carpacci, macedonie).  
-            → Raccogli la ricetta madre e FERMATI. **Non cercare sottoricette**. Se trovi più versioni, raccoglile come documenti separati ma non cercare sottoricette per nessuna.
-            
-
         1. **PENSIERO OBBLIGATORIO**: Prima di chiamare QUALSIASI tool di ricerca("esegui_ricerca_web" e "cerca_ricetta_nel_db"), DEVI chiamare `think_tool` spiegando:
             - In quale FASE ti trovi
             - Cosa stai per fare e perché
@@ -611,7 +655,6 @@ def krag_research_node(state: Blog_Cucina):
             - Se stai ritentando la ricerca dello STESSO elemento (es. dopo fallimento), NON chiamare di nuovo `get_ingredienti` – riutilizza la query che hai già.
             - Usa SEMPRE la query espansa per `cerca_ricetta_nel_db`.
         
-
   
     ### L'ALGORITMO DI RICERCA
 
@@ -642,18 +685,17 @@ def krag_research_node(state: Blog_Cucina):
     
     ▶ **FASE 2: IL LOOP SOTTORICETTE**
 
-        Per OGNI documento WEB o DB della ricetta appena acquisita:
+    Per OGNI documento WEB o DB della ricetta appena acquisita:
 
         1. Leggi attentamente ingredienti e procedimento.
-        2. Cerca eventuali SOTTORICETTE applicando questi criteri:
-        - **CRITERIO ESPLICITO**: Se un ingrediente dice "(vedi preparazione base)" → è una sottoricetta.
-        - **CRITERIO DEDUTTIVO**: Se la ricetta richiede una preparazione complessa (besciamella, ragù, crema, pasta biscotto, glassa, pastella, ecc.) nei suoi ingredienti o passaggi → è una sottoricetta.
-
+        2. Per ogni elemento complesso che incontri, APPLICA IL TEST DELLA SOTTORICETTA
+        definito in cima a questo prompt. Solo gli elementi che SUPERANO il test
+        (trasformazione tramite cottura/emulsione/montatura) vengono considerati.
         3. **Esito dell'analisi**:
-        - **NESSUNA SOTTORICETTA**: 
+        - **NESSUNA SOTTORICETTA CHE SUPERA IL TEST**: 
             - Usa `think_tool` e scrivi "STATO: FINITO" per questa Ricetta Madre.
             - Se ci sono altre Ricette Madri, passaci.
-        - **SOTTORICETTE TROVATE**: 
+        - **SOTTORICETTE TROVATE (che SUPERANO il test)**: 
             - Astrai il loro VERO NOME.
             - Per OGNUNA, esegui la **FASE 3**.
     
@@ -678,20 +720,11 @@ def krag_research_node(state: Blog_Cucina):
             - Procedi al **CHECK 2**.
 
 
-    **CHECK 2: CORTOCIRCUITO (MEMORIA DELLA RICETTA MADRE)**
-
-        1. Usa `think_tool` per analizzare la Ricetta Madre che hai in memoria.
-        2. Scrivi la riflessione in questo formato:
-
-        --- ANALISI ---
-        [Nome sottoricetta]: è già descritta nei passaggi della Ricetta Madre?
-
-        3. **Valuta**:
-        - ✅ Se SÌ: "CORTOCIRCUITO: [Nome] è già inclusa nei passaggi X,Y,Z. STATO: FINITO"
-            - La sottoricetta è RISOLTA. NON cercare altro.
-            - **PASSA ALLA PROSSIMA SOTTORICETTA**.
-        - ❌ Se NO: "CORTOCIRCUITO FALLITO: [Nome] non è descritta nella Ricetta Madre. STATO: CONTINUO"
-            - Procedi al **CHECK 3**.
+    **CHECK 2: RILETTURA RICETTA MADRE** (obbligatorio se il CHECK 1 fallisce, prima del CHECK 3)
+        - Usa `think_tool`: rileggi la Ricetta Madre già in memoria e verifica se contiene
+        già ingredienti E procedimento per questa sottoricetta.
+        - Se sì: "CORTOCIRCUITO RIUSCITO" → sottoricetta risolta, passa alla prossima.
+        - Se no: "CORTOCIRCUITO FALLITO" → procedi al CHECK 3 (web).
 
     **CHECK 3: RICERCA WEB (ULTIMA SPIAGGIA)**
 
@@ -1257,23 +1290,29 @@ def kg_update_node(state: Blog_Cucina):
     # 3. ESTRAZIONE RADICE ONTOLOGICA
     # ==========================================
     prompt_estrazione_radice = f"""
-    Analizza l'input originario dell'utente: '{state['input_utente']}' 
+    Analizza il nome di questa ricetta: '{topic_finale}' 
     e identifica il nome della ricetta base/madre di riferimento.
 
     REGOLE TASSONOMICHE RIGIDE:
-    Devi estrarre la RADICE MADRE in questi due casi specifici:
+    Devi estrarre la RADICE MADRE SOLO in questi due casi specifici:
     1. Modifiche dietetiche/salutistiche/cottura (es. 'Light', 'Vegana', 'Senza glutine', 'Al forno').
     2. Gusti, declinazioni o condimenti classici applicati a una base neutra (es. i gusti delle pizze, i sughi per la pasta, i tipi di risotto o torte).
 
-    Se l'input è già una ricetta base senza specifiche aggiuntive (es. 'Caponata', 'Tiramisù', 'Pizza'), la radice madre sarà uguale all'input stesso.
+    REGOLA DI SICUREZZA (FONDAMENTALE): 
+    Se la ricetta '{topic_finale}' è un piatto autonomo e completo che NON è una variante 
+    di nessun'altra preparazione (es. 'Bruschette al pomodoro', 'Caponata', 'Tiramisù'), 
+    la radice madre DEVE essere identica al nome della ricetta stessa.
+    NON FORZARE mai una radice madre diversa se non sei sicuro al 100% che il piatto sia 
+    una variante diretta e riconoscibile di un'altra preparazione più generica.
+    In caso di dubbio, restituisci sempre il nome della ricetta stessa come radice.
 
-    Esempi di conversione:
+    Esempi di conversione corretta:
     'Pasta alla carbonara light' -> Radice: 'Pasta alla carbonara'
     'Tiramisù senza mascarpone' -> Radice: 'Tiramisù'
     'Pizza capricciosa' -> Radice: 'Pizza'
-    'Pizza margherita' -> Radice: 'Pizza'
-   
-    """
+    'Bruschette al pomodoro' -> Radice: 'Bruschette al pomodoro' (è già un piatto autonomo, NON 'Pane' o 'Pasta')
+    'Caponata' -> Radice: 'Caponata' (piatto autonomo)
+'"""
 
     risultato_originale = llm_structured.invoke(
         [HumanMessage(content=prompt_estrazione_radice)]
@@ -1313,13 +1352,25 @@ def kg_update_node(state: Blog_Cucina):
     except Exception as e:
         print(f"[ERRORE NEO4J] Si è verificato un problema durante il salvataggio: {e}")
 
-    return {
-        "indice_post_corrente": indice_corrente + 1,
-        "approved_db_documents": [],
-        "approved_web_documents": [],
-        "rag_documents": [None],
-        "web_documents": [None],
-        "is_valid": None,
-        "human_feedback": "",
-        "is_rigenera": False,
-    }
+    nuovo_indice = indice_corrente + 1
+    piano = state.get("piano_editoriale")
+    # Se ci sono altri post, prepara il prossimo topic
+    if piano and nuovo_indice < len(piano.sequenza_post):
+        prossimo_topic = piano.sequenza_post[nuovo_indice].topic
+        print(f"[KG UPDATE] Prossimo topic: {prossimo_topic}")
+        return {
+            "indice_post_corrente": nuovo_indice,
+            "topic_corrente": prossimo_topic,
+            # Resetta i campi transitori
+            "rag_documents": [None],
+            "web_documents": [None],
+            "approved_web_documents": [],
+            "approved_db_documents": [],
+            "is_valid": None,
+            "recipe_draft": None,
+            "post_draft": None,
+            "human_feedback": "",
+            "is_rigenera": False,
+        }
+    else:
+        return {"indice_post_corrente": nuovo_indice}
