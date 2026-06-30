@@ -275,6 +275,8 @@ class CucinaKnowledgeGraph:
 
         is_variante = op_madre.lower() != op_finale.lower()
 
+        print(f"{op_madre.lower()}, {op_finale.lower()}")
+
         # ==================================================
         # LA MAGIA K-RAG: Calcolo dei vettori prima del salvataggio
         # ==================================================
@@ -285,14 +287,14 @@ class CucinaKnowledgeGraph:
 
             # BLOG ROOT
             session.run("""
-                MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
+                MERGE (b:Blog { name: "Il mio Blog di Cucina" })
             """)
 
             # RICETTA + POST
             if is_variante:
                 session.run(
                     """
-                    MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
+                    MERGE (b:Blog { name: "Il mio Blog di Cucina" })
  
                     MERGE (madre:Ricetta { name: $topic_originale })
                     SET madre.embedding = $vettore_madre
@@ -329,7 +331,7 @@ class CucinaKnowledgeGraph:
             else:
                 session.run(
                     """
-                    MERGE (b:Blog { name: "Il mio Blog di Cucina Siciliana" })
+                    MERGE (b:Blog { name: "Il mio Blog di Cucina" })
  
                     MERGE (r:Ricetta { name: $topic_originale })
                     SET r.embedding = $vettore_madre
@@ -391,60 +393,45 @@ class CucinaKnowledgeGraph:
             # ==================================================
 
             for sub in sotto_ricette:
-                nome_specifico = sub["nome_specifico"]
-                classe_astratta = sub["classe_astratta"]
+                sub_classe = sub["classe_astratta"].strip().lower()
+                sub_nome = sub["nome_specifico"].strip().lower()
 
-                # 1. Calcoliamo i vettori per la sottoricetta
-                vettore_specifico = self.embeddings.embed_query(nome_specifico)
-                vettore_astratto = self.embeddings.embed_query(classe_astratta)
+                # Calcolo embedding
+                vettore_specifico = self.embeddings.embed_query(sub_nome)
+                vettore_astratto = (
+                    self.embeddings.embed_query(sub_classe)
+                    if sub_nome != sub_classe
+                    else None
+                )
 
                 session.run(
                     """
-                    MATCH (main:Ricetta {
-                        name: $topic_finale
-                    })
-                    
-                    // Salviamo la classe astratta con il suo vettore
-                    MERGE (madre_sub:Ricetta {
-                        name: toLower($classe_astratta)
-                    })
-                    SET madre_sub.embedding = $vettore_astratto
-                    
-                    // Salviamo la variante specifica con il suo vettore
-                    MERGE (specifica_sub:Ricetta {
-                        name: toLower($nome_specifico)
-                    })
-                    SET specifica_sub.embedding = $vettore_specifico
-                    
-                    MERGE (specifica_sub)-[:IS_VARIANTE_DI]->(madre_sub)
+                    MATCH (main:Ricetta { name: $topic_finale })
+                    MERGE (madre_sub:Ricetta { name: $classe_astratta })
+                    SET madre_sub.embedding = $v_astratto  
+                    MERGE (specifica_sub:Ricetta { name: $nome_specifico })
+                    SET specifica_sub.embedding = $v_specifico  
                     MERGE (main)-[:USA_PREPARAZIONE]->(specifica_sub)
                     """,
                     topic_finale=op_finale,
-                    nome_specifico=nome_specifico,
-                    classe_astratta=classe_astratta,
-                    vettore_specifico=vettore_specifico,
-                    vettore_astratto=vettore_astratto,
+                    nome_specifico=sub_nome,
+                    classe_astratta=sub_classe,
+                    v_specifico=vettore_specifico,
+                    v_astratto=vettore_astratto,
                 )
 
-                ingredienti_sub = sub.get("ingredienti", [])
-
-                if ingredienti_sub:
-                    # Il salvataggio degli ingredienti della sottoricetta rimane testuale e strutturale
+                if sub_nome != sub_classe:
                     session.run(
                         """
-                        MATCH (specifica_sub:Ricetta {
-                            name: toLower($nome_specifico)
-                        })
-                        UNWIND $ingredienti AS ing
-                        MERGE (i:Ingrediente {
-                            name: toLower(trim(ing.nome))
-                        })
-                        MERGE (specifica_sub)-[rel:CONTIENE]->(i)
-                        SET rel.quantita = ing.quantita
-                        SET rel.fase = ing.fase_utilizzo
+                        MERGE (specifica_sub:Ricetta { name: $nome_specifico })
+                        MERGE (madre_sub:Ricetta { name: $classe_astratta })
+                        MERGE (specifica_sub)-[:IS_VARIANTE_DI]->(madre_sub)
                         """,
-                        nome_specifico=nome_specifico,
-                        ingredienti=ingredienti_sub,
+                        nome_specifico=sub_nome,
+                        classe_astratta=sub_classe,
+                    )
+                    print(
+                        f"[NEO4J] Registrata variante interna: '{sub_nome}' -> '{sub_classe}'"
                     )
 
             if sotto_ricette:

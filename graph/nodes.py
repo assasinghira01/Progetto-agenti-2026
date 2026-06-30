@@ -596,156 +596,133 @@ def krag_research_node(state: Blog_Cucina):
     riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
     print(f"{topic}")
     messaggi = state.get("messages", [])
-    REGOLA_PRIORITA_FONTI = """
-    🚨 REGOLA D'ORO SULLA RICERCA DELLE SOTTORICETTE (VALE SEMPRE, LEGGI PRIMA DI TUTTO):
-    Per qualsiasi sottoricetta, le fonti hanno un ORDINE DI PRIORITÀ FISSO e NON
-    puoi mai saltarne una per andare alla successiva:
-
-    1. DB LOCALE — è la fonte di verità. Cerca sempre qui PRIMA.
-    2. RICETTA MADRE GIÀ IN MEMORIA — se il DB fallisce, PRIMA di cercare sul web
-    devi rileggere la Ricetta Madre. Se contiene GIÀ ingredienti E procedimento
-    chiari per quella sottoricetta, usa quelli: non serve altro.
-    3. WEB — usalo SOLO se sia il DB (1) sia la Ricetta Madre (2) non ti hanno
-    dato una sottoricetta completa.
-
-    🚫 È UN ERRORE saltare dal punto 1 al punto 3 senza aver fatto il punto 2.
-    """
 
     testo_base = f"""
-    {REGOLA_PRIORITA_FONTI}
-    Sei un Agente Investigatore esperto, specializzato in recupero dati culinari. Il tuo obiettivo è raccogliere DATI per la ricetta completa per il topic: '{topic}' e TUTTE le sue eventuali sottoricette.
-       
-        ### 🚨 IL TEST DELLA SOTTORICETTA (LEGGI PRIMA DI TUTTO IL RESTO)
+        Per ogni elemento da cercare (ricetta principale o sottoricetta) l’ordine di priorità è fisso e mai derogabile:
+    1. **DB LOCALE** – fonte primaria.
+    2. **RICETTA MADRE GIÀ IN MEMORIA** – solo se il DB fallisce, e solo per le sottoricette.
+    3. **WEB** – solo se DB e Ricetta Madre non forniscono una sottoricetta completa.
 
-        Prima di astrarre QUALSIASI elemento come sottoricetta, applica SEMPRE questo test:
-        "Se preparassi questo elemento DA SOLO, senza il piatto principale, otterrei un
-        prodotto con un'identità culinaria propria che esiste anche fuori da questa ricetta?"
+    È VIETATO saltare dal punto 1 al punto 3 senza aver eseguito il punto 2.
 
-        ✅ TEST SUPERATO (È una sottoricetta) — l'elemento subisce una TRASFORMAZIONE che lo
-        rende un prodotto nuovo, riconoscibile e nominabile da solo:
-        - Besciamella, Ragù, Maionese, Crema pasticcera, Pasta biscotto, Glassa, Pastella,
-        Brodo, Pesto, Salsa di pomodoro base.
-        - Caratteristica comune: richiede COTTURA, EMULSIONE o MONTATURA per esistere.
+    ---
 
-        ❌ TEST FALLITO (NON è una sottoricetta, è un INGREDIENTE COMPOSTO o un PASSAGGIO) —
-        l'elemento è semplicemente un MIX di ingredienti crudi mescolati insieme, senza
-        trasformazione fisica o chimica significativa:
-        - Marinature (es. "marinatura con spezie", "marinatura al limone")
-        - Miscele di spezie o aromi crudi (es. "miscela di spezie", "mix di erbe")
-        - Panature (farina/uovo/pangrattato usati per impanare)
-        - Condimenti a crudo (es. olio e limone, salsa di soia e zenzero)
-        - Yogurt, formaggi, sfumature di vino, marinate, impanature
+    ## IL TUO RUOLO
+    Sei un Agente Investigatore culinario. Il tuo compito è raccogliere i dati completi per la ricetta indicata dal topic: **'{topic}'**, e per tutte le sue eventuali sottoricette che superano il test di seguito.
 
-        REGOLA OPERATIVA: se un elemento NON supera il test, NON chiamare `think_tool` per
-        "esplorarlo come sottoricetta". Trattalo SEMPRE come un ingrediente diretto (anche
-        se è composto da più elementi crudi mescolati) e passa OLTRE senza ulteriori ricerche.
+    ---
 
-        ⚠️ ERRORE COMUNE DA EVITARE: NON ri-applicare il criterio deduttivo a un elemento che
-        hai già scartato. 
+    ## TEST DELLA SOTTORICETTA (OBBLIGATORIO)
+    Prima di considerare un elemento come sottoricetta, applica questo test:
 
-    ###  REGOLE GENERALI (LEGGI CON ATTENZIONE)
-    
-        1. **PENSIERO OBBLIGATORIO**: Prima di chiamare QUALSIASI tool di ricerca("esegui_ricerca_web" e "cerca_ricetta_nel_db"), DEVI chiamare `think_tool` spiegando:
-            - In quale FASE ti trovi
-            - Cosa stai per fare e perché
-            - Concludi con "STATO: CONTINUO" (o "STATO: FINITO" se hai completato TUTTO)
+    *“Se preparassi questo elemento DA SOLO, senza il piatto principale, otterrei un prodotto con un’identità culinaria propria che esiste anche fuori da questa ricetta?”*
 
-        2. **QUERY ESPANSE (get_ingredienti)**:
-            - Per OGNI nuovo elemento che cerchi (Ricetta Madre o sottoricetta), DEVI chiamare `get_ingredienti` UNA VOLTA per ottenere una query espansa.
-            - Se stai ritentando la ricerca dello STESSO elemento (es. dopo fallimento), NON chiamare di nuovo `get_ingredienti` – riutilizza la query che hai già.
-            - Usa SEMPRE la query espansa per `cerca_ricetta_nel_db`.
-        
-  
-    ### L'ALGORITMO DI RICERCA
+    ✅ **SUPERATO (è una sottoricetta)** – l’elemento subisce una TRASFORMAZIONE tramite cottura, emulsione o montatura che lo rende un prodotto nuovo e riconoscibile.  
+    Esempi: besciamella, ragù, maionese, crema pasticcera, pasta biscotto, glassa, pastella, brodo, pesto, salsa di pomodoro base.
 
-    Per OGNI elemento che devi cercare (partendo da '{topic}', poi ogni sottoricetta), esegui questa sequenza:
-  
-    ▶ **FASE 1: RICERCA LOCALE (DB FIRST)**
+    ❌ **FALLITO (NON è una sottoricetta)** – l’elemento è semplicemente un mix di ingredienti crudi mescolati, senza trasformazione fisica o chimica significativa.  
+    Esempi: marinature, miscele di spezie, panature, condimenti a crudo, yogurt, formaggi, sfumature di vino.
 
-        1. **OTTIENI QUERY ESPANSA**: 
-        - Chiama `get_ingredienti` per l'elemento corrente (se non l'hai già fatto).
-        - Usa il risultato per costruire una query dettagliata.
+    Se il test fallisce, considera quell’elemento come un normale ingrediente e NON cercarlo come sottoricetta. Non applicare nuovamente il test dopo averlo già scartato.
 
-        2. **CERCA NEL DB**: 
-        - Usa `cerca_ricetta_nel_db` con la query espansa.
+    ---
 
-        3. **VALUTA IL RISULTATO**:
-        - ✅ Se TROVATA una ricetta COMPLETA con ingredienti e procedimento chiari e coerente al topic richiesto dall'utente:
-            - Memorizza i dati.
-            - **VIETATO** usare il web per questa ricetta.
-            - Vai alla **FASE 2**.
-        - ❌ Se NON TROVATA, INCOMPLETA o incoerente al topic richiesto:
-            - chiama il think tool per analizzare il fallimento
-            - La ricerca locale è fallita.
-            - Vai al punto 4.
-            
-        4. **RICERCA WEB** (solo se il DB ha fallito):
-        - Usa `esegui_ricerca_web` per cercare l'elemento corrente.
-        - Memorizza i dati e vai alla **FASE 2**.
-    
-    ▶ **FASE 2: IL LOOP SOTTORICETTE**
+    ## TEST DI ATTINENZA ALLA VARIANTE (SOLO PER IL TOPIC PRINCIPALE)
+    Il topic **'{topic}'** può contenere una variante esplicita (es. “light”, “vegana”, “senza uova”, “al forno”).  
+    Prima di accettare un documento (DB o Web) per la ricetta principale, chiediti:
 
-    Per OGNI documento WEB o DB della ricetta appena acquisita:
+    *“Questo documento rispetta la variante specifica richiesta, o è la versione classica/base?”*
 
-        1. Leggi attentamente ingredienti e procedimento.
-        2. Per ogni elemento complesso che incontri, APPLICA IL TEST DELLA SOTTORICETTA
-        definito in cima a questo prompt. Solo gli elementi che SUPERANO il test
-        (trasformazione tramite cottura/emulsione/montatura) vengono considerati.
-        3. **Esito dell'analisi**:
-        - **NESSUNA SOTTORICETTA CHE SUPERA IL TEST**: 
-            - Usa `think_tool` e scrivi "STATO: FINITO" per questa Ricetta Madre.
-            - Se ci sono altre Ricette Madri, passaci.
-        - **SOTTORICETTE TROVATE (che SUPERANO il test)**: 
-            - Astrai il loro VERO NOME.
-            - Per OGNUNA, esegui la **FASE 3**.
-    
-    ▶ **FASE 3: LOOP SOTTORICETTE (eseguito per OGNI sottoricetta trovata)**
+    - Se il topic è “besciamella light” e il documento è la besciamella classica senza alcuna riduzione calorica o sostituzione → **TEST FALLITO**. Scartalo.
+    - Se il topic è “Tiramisù senza uova crude” e il documento usa uova crude classiche → **TEST FALLITO**.
+    - Se il topic NON specifica nessuna variante, la ricetta classica SUPERA SEMPRE il test.
 
-    Per OGNI sottoricetta (es. "Maionese", "Besciamella", "Pasta biscotto"):
+    Nel `think_tool`, quando valuti un documento per il topic principale, DICHIARA ESPLICITAMENTE l'esito:
+    "Test di attinenza: SUPERATO" oppure "Test di attinenza: FALLITO — [motivo specifico]".
 
-    **CHECK 1: RICERCA LOCALE (DB) — PRIORITÀ ASSOLUTA**
+    ---
 
-        1. **OTTIENI QUERY ESPANSA**:
-        - Se è la prima volta che cerchi questa sottoricetta, chiama `get_ingredienti` per essa.
-        - Usa la query espansa per `cerca_ricetta_nel_db`.
+    ## REGOLE GLOBALI
+    1. **PENSIERO OBBLIGATORIO**: prima di chiamare qualsiasi tool di ricerca (`esegui_ricerca_web`, `cerca_ricetta_nel_db`), invoca `think_tool` spiegando:
+    - In quale FASE ti trovi.
+    - Cosa stai per fare e perché.
+    - Termina con “STATO: CONTINUO” (o “STATO: FINITO” se hai completato tutto).
 
-        2. **CERCA NEL DB**:
-        - Usa `cerca_ricetta_nel_db` con la query espansa.
+    2. **QUERY ESPANSA**:
+    - Per ogni NUOVO elemento da cercare (ricetta madre o sottoricetta), chiama `get_ingredienti` UNA volta.
+    - Se ritenti la ricerca dello stesso elemento dopo un fallimento, riutilizza la query già ottenuta senza richiamare `get_ingredienti`.
+    - Usa sempre la query espansa con `cerca_ricetta_nel_db`.
 
-        3. **VALUTA**:
-        - ✅ Se TROVATA una ricetta COMPLETA (ingredienti + procedimento):
-            - La sottoricetta è RISOLTA. Memorizza i dati.
-            - **PASSA ALLA PROSSIMA SOTTORICETTA**.
-        - ❌ Se NON TROVATA o INCOMPLETA:
-            - Procedi al **CHECK 2**.
+    ---
 
+    ## ALGORITMO DI RICERCA
 
-    **CHECK 2: RILETTURA RICETTA MADRE** (obbligatorio se il CHECK 1 fallisce, prima del CHECK 3)
-        - Usa `think_tool`: rileggi la Ricetta Madre già in memoria e verifica se contiene
-        già ingredienti E procedimento per questa sottoricetta.
-        - Se sì: "CORTOCIRCUITO RIUSCITO" → sottoricetta risolta, passa alla prossima.
-        - Se no: "CORTOCIRCUITO FALLITO" → procedi al CHECK 3 (web).
+    ### ▶ FASE 1 – RICERCA DELLA RICETTA PRINCIPALE (TOPIC)
 
-    **CHECK 3: RICERCA WEB (ULTIMA SPIAGGIA)**
+    1. **Ottieni query espansa**:
+    - Chiama `get_ingredienti` per `{topic}`.
+    2. **Cerca nel DB**:
+    - Usa `cerca_ricetta_nel_db` con la query espansa.
+    3. **Valuta il risultato**:
+    - ✅ Se TROVATA una ricetta **completa** (ingredienti + procedimento) **E** supera il **TEST DI ATTINENZA ALLA VARIANTE** → memorizza e passa direttamente alla **FASE 2** (è VIETATO cercare sul Web).
+    - ❌ Se NON TROVATA, incompleta, o **fallisce il test di attinenza** → chiama `think_tool` per analizzare il fallimento, poi vai al punto 4.
+    4. **Ricerca Web (solo in caso di fallimento DB)**:
+    - Usa `esegui_ricerca_web` per `{topic}` usando la query espansa.
+    - Valuta i documenti ottenuti con il **TEST DI ATTINENZA ALLA VARIANTE**.
+    - ✅ Se trovi un documento che SUPERA il test → memorizzalo come fonte primaria e passa alla **FASE 2**.
+    - ❌ Se TUTTI i documenti restituiti FALLISCONO il test (es. mostrano solo la versione classica/base):
+            - Chiama `think_tool` e dichiara: "Primo tentativo Web fallito per Test di Attinenza. Riformulo la query per cercare sinonimi e varianti della richiesta."
+            - **Riformula mentalmente la query** (NON chiamare di nuovo `get_ingredienti`). Usa sinonimi o termini equivalenti della variante. Esempi:
+                - "carbonara light" → "carbonara ipocalorica" oppure "carbonara senza sensi di colpa" o "carbonara light ricetta"
+                - "besciamella light" → "besciamella senza burro" o "besciamella leggera" o "besciamella light calorie"
+                - "maionese senza uova" → "maionese vegana" o "finta maionese"
+            - Esegui un **secondo tentativo** con `esegui_ricerca_web` usando la NUOVA query.
+            - Valuta nuovamente i documenti con il Test di Attinenza.
+            - ✅ Se trovi un documento che SUPERA il test → memorizzalo e passa alla **FASE 2**.
+            - ❌ Se ANCHE il secondo tentativo fallisce → dichiara nel `think_tool`: "FALLIMENTO: nessuna fonte attinente alla variante trovata dopo doppio tentativo Web. Procedo con la fonte classica più vicina ma segnalo esplicitamente la mancata verifica della variante." Quindi usa il miglior documento classico trovato (se esiste) e passa alla **FASE 2**.
 
-        1. Solo se il **CHECK 2** ha dato esito negativo, usa `esegui_ricerca_web` per cercare la sottoricetta.
+    ---
 
-        2. **Valuta**:
-        - ✅ Se TROVATA: Memorizza, la sottoricetta è RISOLTA. **PASSA ALLA PROSSIMA**.
-        - ❌ Se NON TROVATA: Dichiara "FALLIMENTO: [Nome] non trovata né in DB né in Web. ABBANDONO il ramo."
-            - **PASSA ALLA PROSSIMA** (NON ripetere).
+    ### ▶ FASE 2 – ANALISI DELLE SOTTORICETTE
+    Per ogni documento (DB o Web) della ricetta principale appena acquisito:
 
+    1. Leggi attentamente ingredienti e procedimento.
+    2. Per ogni elemento complesso, applica il **TEST DELLA SOTTORICETTA**.
+    3. **Nessuna sottoricetta che supera il test** → invoca `think_tool` con “STATO: FINITO per questa Ricetta Madre”.
+    4. **Sottoricette trovate** → per ognuna (usando il suo VERO nome) esegui la **FASE 3**.
 
-    ▶ **TERMINAZIONE**
+    ---
 
-    - Dopo aver risolto o abbandonato TUTTE le sottoricette di una Ricetta Madre, la Ricetta Madre è COMPLETA.
-    - Se ci sono altre Ricette Madri, processale una alla volta con lo stesso algoritmo.
-    - Solo quando TUTTE le Ricette Madri e TUTTE le loro sottoricette sono risolte, usa `think_tool` e scrivi "STATO: FINITO".
+    ### ▶ FASE 3 – RICERCA DI UNA SOTTORICETTA (loop per ognuna)
 
-    ### STATO ATTUALE
+    **CHECK 1 – DB LOCALE (priorità assoluta)**
+    1. Se è la prima volta, chiama `get_ingredienti` per la sottoricetta.
+    2. Cerca con `cerca_ricetta_nel_db` usando la query espansa.
+    3. ✅ **Trovata completa** → memorizza, sottoricetta RISOLTA. Passa alla prossima.
+    ❌ **Non trovata o incompleta** → vai al CHECK 2.
 
-    Sei pronto ad agire. Inizia invocando `think_tool` dichiarando l'avvio della MACRO-FASE 1 per '{topic}'.
-    """
+    **CHECK 2 – CORTOCIRCUITO CON LA RICETTA MADRE** (obbligatorio, prima del Web)
+    - Invoca `think_tool` e rileggi la Ricetta Madre già in memoria.
+    - Se contiene ingredienti E procedimento chiari per questa sottoricetta: **CORTOCIRCUITO RIUSCITO** → sottoricetta risolta, passa alla prossima.
+    - Altrimenti: **CORTOCIRCUITO FALLITO** → vai al CHECK 3.
+
+    **CHECK 3 – RICERCA WEB (ultima spiaggia)**
+    1. Usa `esegui_ricerca_web` per la sottoricetta.
+    2. ✅ **Trovata** → memorizza, RISOLTA.
+    ❌ **Non trovata** → dichiara “FALLIMENTO: [Nome] non trovata né in DB né in Web. ABBANDONO il ramo.” Passa alla prossima.
+
+    ---
+
+    ### ▶ TERMINAZIONE
+    - Quando tutte le sottoricette di una Ricetta Madre sono risolte o abbandonate, la Ricetta Madre è completa.
+    - Se ci sono più Ricette Madri (es. topic multi-ricetta), processale una alla volta.
+    - Solo quando **tutto** è stato completato, invoca `think_tool` con “STATO: FINITO”.
+
+    ---
+
+    ## STATO ATTUALE
+    Inizia invocando `think_tool` per dichiarare l’avvio della FASE 1 per il topic: **'{topic}'**.
+        """
 
     riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
 
@@ -1290,28 +1267,21 @@ def kg_update_node(state: Blog_Cucina):
     # 3. ESTRAZIONE RADICE ONTOLOGICA
     # ==========================================
     prompt_estrazione_radice = f"""
-    Analizza il nome di questa ricetta: '{topic_finale}' 
-    e identifica il nome della ricetta base/madre di riferimento.
+   
+   Sei un tassonomista culinario. Devi identificare la RADICE MADRE di una ricetta.
+REGOLE (in ordine di priorità):
+1. Se il nome contiene una MODIFICA DIETETICA o DI COTTURA (light, senza, vegana, al forno, integrale, dietetica, etc.), la radice è il nome SENZA quella parola.
+   Esempi: "Carbonara light" -> "Carbonara"; "Pasta alla carbonara light" -> "Pasta alla carbonara"; "Tiramisù senza mascarpone" -> "Tiramisù".
+2. Se il nome è una VARIANTE GUSTO di una base neutra (es. gusti di pizza, sughi per pasta, tipi di risotto), la radice è il nome della base.
+   Esempi: "Pizza capricciosa" -> "Pizza"; "Risotto ai funghi" -> "Risotto"; "Sugo all'arrabbiata" -> "Sugo di pomodoro".
+3. Se il nome è un PIATTO AUTONOMO, non derivato da un altro (es. "Bruschette al pomodoro", "Caponata", "Tiramisù" classico), la radice è il nome stesso.
+   Attenzione: "Tiramisù" è autonomo, ma "Tiramisù al pistacchio" è una variante gusto -> radice "Tiramisù".
+4. In caso di dubbio, applica la regola 1 o 2 se riconosci una parola chiave, altrimenti usa il nome stesso.
 
-    REGOLE TASSONOMICHE RIGIDE:
-    Devi estrarre la RADICE MADRE SOLO in questi due casi specifici:
-    1. Modifiche dietetiche/salutistiche/cottura (es. 'Light', 'Vegana', 'Senza glutine', 'Al forno').
-    2. Gusti, declinazioni o condimenti classici applicati a una base neutra (es. i gusti delle pizze, i sughi per la pasta, i tipi di risotto o torte).
+Ora analizza: '{topic_finale}'
 
-    REGOLA DI SICUREZZA (FONDAMENTALE): 
-    Se la ricetta '{topic_finale}' è un piatto autonomo e completo che NON è una variante 
-    di nessun'altra preparazione (es. 'Bruschette al pomodoro', 'Caponata', 'Tiramisù'), 
-    la radice madre DEVE essere identica al nome della ricetta stessa.
-    NON FORZARE mai una radice madre diversa se non sei sicuro al 100% che il piatto sia 
-    una variante diretta e riconoscibile di un'altra preparazione più generica.
-    In caso di dubbio, restituisci sempre il nome della ricetta stessa come radice.
+Rispondi SOLO con il nome della radice madre, senza commenti o spiegazioni.
 
-    Esempi di conversione corretta:
-    'Pasta alla carbonara light' -> Radice: 'Pasta alla carbonara'
-    'Tiramisù senza mascarpone' -> Radice: 'Tiramisù'
-    'Pizza capricciosa' -> Radice: 'Pizza'
-    'Bruschette al pomodoro' -> Radice: 'Bruschette al pomodoro' (è già un piatto autonomo, NON 'Pane' o 'Pasta')
-    'Caponata' -> Radice: 'Caponata' (piatto autonomo)
 '"""
 
     risultato_originale = llm_structured.invoke(
