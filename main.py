@@ -136,7 +136,7 @@ def main():
                 break
 
             print("\n--- BOZZA POST ---\n", bozza, "\n----------------")
-            scelta = input("1=APPROVA:\n2=MODIFICA:\n3=RIGENERA\n:4=SCARTA:\n ").strip()
+            scelta = input("1=APPROVA:\n2=MODIFICA:\n3=RIGENERA:\n4=SCARTA:\n ").strip()
 
             if scelta == "1":
 

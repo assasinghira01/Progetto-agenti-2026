@@ -7,17 +7,18 @@ from tools.kg_tool import (
     controlla_storico_post,
     get_ultimi_post,
     get_ingredienti,
+    get_claim_pertinenti,
+    get_claim_per_retrieval,
 )
 
 load_dotenv()
 
 
-# Agente intelligente OpenAI
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=1000)
 
 
-# --- IL BINDING DEGLI STRUMENTI (Pattern MCP) ---
-# Impacchettiamo i nostri 3 strumenti obbligatori
+# ---  BINDING DEGLI STRUMENTI (Pattern MCP) ---
+
 lista_tools = [
     get_ultimi_post,
     esegui_ricerca_web,
@@ -25,8 +26,9 @@ lista_tools = [
     controlla_storico_post,
     get_ingredienti,
     think_tool,
+    get_claim_pertinenti,
+    get_claim_per_retrieval,
 ]
 
-# 2. Creiamo un "Super-Cervello" dotato di mani.
-# llm_con_tools è la variabile che useremo nel nostro Nodo di Ricerca!
+
 llm_con_tools = llm.bind_tools(lista_tools, parallel_tool_calls=False)

@@ -5,7 +5,6 @@ from langchain_core.messages import (
     SystemMessage,
     HumanMessage,
     ToolMessage,
-    filter_messages,
 )
 from langgraph.types import interrupt
 from config import llm, llm_con_tools
@@ -54,7 +53,13 @@ def planner_node(state: Blog_Cucina):
 
     FASE 1 - RECUPERO STORICO: 
     Chiama il tool `get_ultimi_post` per capire cosa è stato pubblicato di recente. (Non richiamarlo più di una volta). Usa il `think_tool` per riflettere sui risultati.
-
+    FASE 1.5 – RECUPERO CLAIM ESISTENTI (OBBLIGATORIO):
+    Dopo aver visto i post recenti, chiama `get_claim_pertinenti` con un topic generico del dominio (es. "cucina italiana" o "cucina siciliana").
+    Usa i claim restituiti per:
+    - Trovare argomenti già trattati da approfondire (es. se c'è un claim sulla besciamella, proponi un piatto che la utilizza).
+    - Identificare lacune tematiche (es. se ci sono molti claim su primi piatti, proponi un secondo o un dolce).
+    Nel `think_tool`, commenta esplicitamente come i claim hanno influenzato la scelta dei topic.
+    
     FASE 2 - IDEAZIONE INTERNA E VERIFICA (IL CUORE DEL TUO LAVORO):
     NON generare ancora il piano finale. Nella tua mente, elabora  SOLO 3 nuovi topic (variando le categorie in base alle tipolgie, se sono state pubblicati due primi e una secondo puoi generare un antipasto o un dessert, se una 
     tipolgia non ha publicata dai priorita a quest'ultima, se non sono stati pubblicati piati vegani  dai priorita ad un piatto vegano. L'obbiettivo è creare contenuti unici e rilevanti per i lettori del blog non annoiandoli).
@@ -62,7 +67,7 @@ def planner_node(state: Blog_Cucina):
     Per **OGNUNO** di questi 3 topic, è ASSOLUTAMENTE OBBLIGATORIO chiamare il tool `controlla_storico_post` SU ognuno di essi, SEI OBBLIGATO A FARLO A PRESCINDERE. 
     - Se il tool risponde "BLOCCATO", scarta l'idea, usa il `think_tool` per riflettere sull'errore, e proponi un piatto diverso verificandolo di nuovo.
     - Se il tool risponde "OK", il topic è approvato.
-
+    
     FASE 3 - GENERAZIONE DEL PIANO:
     SOLO DOPO aver ottenuto 3 risposte "OK" dal tool `controlla_storico_post`, puoi procedere a generare il testo finale del piano editoriale con i 3 topic approvati.
        ## Formato dei topic (REGOLA FERREA)
@@ -95,9 +100,13 @@ def planner_node(state: Blog_Cucina):
             --- FEEDBACK UTENTE (PIANO RIFIUTATO) ---
             ATTENZIONE: Il piano editoriale precedente è stato RIFIUTATO. 
             L'utente ha esplicitamente scartato i seguenti topic: {blacklist}.
-            
+            REGOLA ANTI-STALLO (attiva solo se la blacklist contiene già 1 o più piatti):
+                Quando la blacklist non è vuota, significa che le tue proposte precedenti sono state rifiutate perché troppo simili al piatto originale. In questo caso:
+                - NON proporre MAI un piatto che contenga l'ingrediente principale del piatto bloccato nella stessa forma (es. se il piatto bloccato è "Pollo al limone", evita QUALSIASI piatto a base di pollo intero, a fette o a cubetti).
+                - Spostati su una proteina DIVERSA (es. vitello, maiale, tacchino, pesce) oppure su un piatto completamente diverso che condivida solo la tecnica o il sapore (es. un risotto al limone, una pasta al limone, un dessert al limone).
+                - L'obiettivo è sorprendere il lettore con qualcosa di affine ma inaspettato, non una ripetizione mascherata.
             REGOLA ASSOLUTA: NON PROPORRE NESSUNO DI QUESTI TOPIC SCARTATI. 
-            ⛔Devi generare 3 idee COMPLETAMENTE DIVERSE DA :{blacklist}.
+                ⛔Devi generare 3 idee COMPLETAMENTE DIVERSE DA :{blacklist}.
             
             --- REGOLE DI WORKFLOW PER LA RIGENERAZIONE ---
             1. Nel tuo PRIMO utilizzo del `think_tool` in questo nuovo ciclo, DEVI dichiarare esplicitamente di aver ricevuto il feedback negativo e menzionare i topic scartati ({blacklist}) che eviterai.
@@ -189,18 +198,31 @@ def planner_node(state: Blog_Cucina):
              APPENA RICEVI LA RISPOSTA DEL TOOL, DEVI chiamare il `think_tool` e dichiarare il risultato (OK o BLOCCATO). Solo dopo puoi procedere.
     
      FASE 2. PROCEDURA Di RAGIONAMENTO  (SEGUI ALLA LETTERA):
-       se il database risponde "OK" la direttiva dell'utente non è ancora stata pubblicata. Non hai bisogno di proporre varianti. Vai direttamente alla FASE 3
-       Se il database risponde "BLOCCATO",  direttiva dell'utente è già stata pubblicata. NON generare idee a caso. Esegui questa sequenza esatta SOLO SE il database risponde "BLOCCATO":
+       ⚠️ REGOLA FERREA: 
+            -In caso di OK, NON chiamare MAI `get_ingredienti` né `controlla_storico_post` per varianti.
+            Devi IMMEDIATAMENTE andare alla FASE 3 e concludere con "STATO: FINITO" senza ulteriori azioni.
+            -Se il database risponde "BLOCCATO",  direttiva dell'utente è già stata pubblicata. NON generare idee a caso. Esegui questa sequenza esatta SOLO SE il database risponde "BLOCCATO":
        - AZIONE 1: Chiama immediatamente il tool `get_ingredienti` passando il nome del piatto bloccato.
        - AZIONE 2: Attendi i risultati da Neo4j (gli ingredienti).
-       - AZIONE 3: Chiama il tuo `think_tool` per ragionare sugli ingredienti estratti e scegli 2 opzioni.
-            - Opzione A (Variante): Se il piatto è facilmente personalizzabile nei gusti , proponi una variante .
-            - Opzione B (Ricetta Simile): Se il piatto è una preparazione tradizionale strutturata (es. Arancini, Carbonara, Lasagne), usa gli ingredienti per trovare un piatto simile ma concettualmente diverso (es. "Supplì", "Gricia", "Cannelloni").
-
+       - AZIONE 2.5 (FACOLTATIVA MA CONSIGLIATA): Se vuoi trovare una variante più coerente con la storia del blog, chiama `get_claim_pertinenti` con il nome del piatto bloccato. Usa i claim restituiti per orientarti verso una ricetta simile o un approfondimento tematico (es. se c’è un claim sulla besciamella, potresti proporre un piatto che la utilizza).
+       - AZIONE 3: Chiama il tuo `think_tool` per ragionare sugli ingredienti estratti **e sugli eventuali claim** e scegli UNA proposta tra le due opzioni seguenti.
+                    Scegli l'opzione in base alla NATURA del piatto bloccato:
+                    ▶ OPZIONE A – VARIANTE GUSTO / COTTURA (scegli questa se il piatto bloccato è una base neutra facilmente declinabile, es. pizza, risotto, pasta al sugo, torta):
+                        - Cambia il GUSTO o il CONDIMENTO principale, NON la proteina base.
+                        - Esempio: se il piatto bloccato è “Pizza margherita”, proponi “Pizza capricciosa” o “Pizza ai quattro formaggi”.
+                        - Esempio: se è “Risotto ai funghi”, proponi “Risotto allo zafferano” o “Risotto al radicchio”.
+                        - VIETATO: cambiare solo il tipo di carne/pesce mantenendo identica la preparazione (es. “Pollo al limone” → “Vitello al limone” è PIGRIZIA, NON farlo).
+                    ▶ OPZIONE B – RICETTA SIMILE (scegli questa se il piatto bloccato è una preparazione strutturata e completa, es. Arancini, Carbonara, Lasagne, Pollo al limone, Spezzatino):
+                        - Individua un piatto DIVERSO che condivida 1-2 ingredienti chiave ma abbia un NOME, una TECNICA e un'IDENTITÀ CULINARIA PROPRIA.
+                        - Esempi REALI:
+                            - “Pollo al limone” → “Scaloppine al limone” o “Piccata di vitello al limone” (cambia taglio, tecnica, nome).
+                            - “Carbonara” → “Gricia” o “Cacio e pepe” (stessa famiglia, identità distinte).
+                            - “Lasagne al ragù” → “Cannelloni ricotta e spinaci” o “Pasticcio di maccheroni”.
+                        - VIETATO: riproporre lo stesso piatto con un ingrediente cambiato (es. “Pollo al limone” → “Tacchino al limone” è bandito).
+                    In entrambi i casi, la proposta DEVE essere un piatto COMPLETO e RICONOSCIBILE, non una combinazione artificiale di ingredienti.
         - AZIONE 4: Dopo aver ragionato ed elaborato la nuova idea, verifica la TUA NUOVA proposta chiamando di nuovo `controlla_storico_post`.
         - Ripeti il ciclo se la nuova idea è ancora bloccata. SE una tua idea riceve "OK" vai alla FASE 3
     
-
      FASE 3. CONCLUSIONE:
        -Solo quando avrai ottenuto un "OK" per un topic, termina con "STATO: FINITO".
        + Nota: Il topic verrà comunque sottoposto all'approvazione dell'utente, ma il tuo compito è terminato..
@@ -238,7 +260,7 @@ def planner_node(state: Blog_Cucina):
             4. Se risulta "BLOCCATO", applica la normale procedura di risoluzione conflitti.
             5. 🚨 REGOLA DI STOP: Appena ricevi un "OK" definitivo, DEVI FERMARTI IMMEDIATAMENTE e chiudere il messaggio con "STATO: FINITO".
             
-            
+
             
             ## Formato dei topic (REGOLA FERREA)
             - **Singola Preparazione:** Il topic deve essere una ricetta reale, specifica e SINGOLA. 
@@ -299,6 +321,13 @@ def planner_node(state: Blog_Cucina):
 
     # Ritorno da un Tool (il ragionamento è in corso)
     if messaggi and isinstance(messaggi[-1], ToolMessage):
+        if messaggi[-1].name == "get_claim_pertinenti":
+            if "NESSUN_CLAIM" not in messaggi[-1].content:
+                print(
+                    "[PLANNER] Claim pertinenti ricevuti e analizzati nel prossimo think_tool."
+                )
+            else:
+                print("[PLANNER] Nessun claim pertinente trovato.")
         risposta_llm = llm_con_tools.invoke([prompt] + messaggi)
         return {"messages": [risposta_llm], "nodo_chiamante": "planner"}
 
@@ -596,9 +625,30 @@ def krag_research_node(state: Blog_Cucina):
     riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
     print(f"{topic}")
     messaggi = state.get("messages", [])
-
+    # MOD
+    # Conteggio delle ricerche web già effettuate per questo topic
+    conteggio_web = 0
+    for msg in state.get("messages", []):
+        if isinstance(msg, ToolMessage) and msg.name == "esegui_ricerca_web":
+            conteggio_web += 1
+    if (
+        messaggi
+        and isinstance(messaggi[-1], ToolMessage)
+        and messaggi[-1].name == "get_claim_pertinenti"
+    ):
+        if "NESSUN_CLAIM" not in messaggi[-1].content:
+            print(
+                "[RESEARCH] Claim pertinenti ricevuti. L'agente li analizzerà nel prossimo think_tool."
+            )
+        else:
+            print("[RESEARCH] Nessun claim pertinente trovato.")
+    # modifica parte finale del prompt per conteggio ricerche web + limite massimo
     testo_base = f"""
-        Per ogni elemento da cercare (ricetta principale o sottoricetta) l’ordine di priorità è fisso e mai derogabile:
+    🚨 LIMITE MASSIMO RICERCHE WEB PER LA RICETTA PRINCIPALE: hai già effettuato {conteggio_web} chiamate a `esegui_ricerca_web` per questo topic.
+        Puoi effettuarne al massimo 2 in totale. Se raggiungi il limite senza aver trovato una ricetta valida, DEVI dichiarare
+        "FALLIMENTO: Ricetta non disponibile" e concludere immediatamente con STATO: FINITO, senza cercare ulteriormente.
+        
+    Per ogni elemento da cercare (ricetta principale o sottoricetta) l’ordine di priorità è fisso e mai derogabile:
     1. **DB LOCALE** – fonte primaria.
     2. **RICETTA MADRE GIÀ IN MEMORIA** – solo se il DB fallisce, e solo per le sottoricette.
     3. **WEB** – solo se DB e Ricetta Madre non forniscono una sottoricetta completa.
@@ -611,22 +661,26 @@ def krag_research_node(state: Blog_Cucina):
     Sei un Agente Investigatore culinario. Il tuo compito è raccogliere i dati completi per la ricetta indicata dal topic: **'{topic}'**, e per tutte le sue eventuali sottoricette che superano il test di seguito.
 
     ---
-
     ## TEST DELLA SOTTORICETTA (OBBLIGATORIO)
-    Prima di considerare un elemento come sottoricetta, applica questo test:
+    *"Se preparassi questo ingrediente DA SOLO, otterrei un prodotto con un'identità culinaria propria che esiste anche fuori da questa ricetta?"*
 
-    *“Se preparassi questo elemento DA SOLO, senza il piatto principale, otterrei un prodotto con un’identità culinaria propria che esiste anche fuori da questa ricetta?”*
+    ✅ **SUPERATO** – l'ingrediente subisce una TRASFORMAZIONE (cottura, emulsione, montatura) che lo rende un prodotto nuovo e riconoscibile e possiede dei suoi ingredienti.
+    Esempi: besciamella, ragù, maionese, crema pasticcera, pasta biscotto, brodo di carne, pesto di basilico, crema al mascarpone .
 
-    ✅ **SUPERATO (è una sottoricetta)** – l’elemento subisce una TRASFORMAZIONE tramite cottura, emulsione o montatura che lo rende un prodotto nuovo e riconoscibile.  
-    Esempi: besciamella, ragù, maionese, crema pasticcera, pasta biscotto, glassa, pastella, brodo, pesto, salsa di pomodoro base.
+    Due criteri operativi guidano la tua analisi:
+    - **CRITERIO ESPLICITO**: se il testo di un ingrediente contiene rimandi come “(vedi preparazione base)” o similari, quello è un chiaro indicatore di una sottoricetta.
+    - **CRITERIO DEDUTTIVO**: se la ricetta descrive, nei passaggi del suo procedimento, la preparazione di un ingrediente complesso (es. besciamella, ragù, crema pasticcera, pasta biscotto, pastella), se citato quel ingrediente va considerato come una sottoricetta.
 
-    ❌ **FALLITO (NON è una sottoricetta)** – l’elemento è semplicemente un mix di ingredienti crudi mescolati, senza trasformazione fisica o chimica significativa.  
-    Esempi: marinature, miscele di spezie, panature, condimenti a crudo, yogurt, formaggi, sfumature di vino.
+    ❌ **FALLITO** – l'ingrediente è già pronto o subisce solo miscelazione a crudo, senza trasformazione significativa. In particolare:
+        - **Condimenti e mix crudi**: marinature, panature, miscele di spezie, triti semplici, salse crude.
+        - **Prodotti finiti**: formaggi (anche vegetali), salumi/affettati (anche vegetali), yogurt, paste spalmabili (pasta di olive, burro di arachidi).
+        - **Bevande e liquidi**: caffè, tè, vino, liquori, brodo già fatto,latte, acqua aromatizzata.
+        - **Preparazioni minime**: uova sode, ammolli (uvetta, funghi secchi), guarnizioni (granella, zucchero a velo).
+        - **Bagne e sciroppi dolci**: bagna di fragole, bagna al caffè, sciroppo di zucchero, succo di frutta preparato al momento.
 
-    Se il test fallisce, considera quell’elemento come un normale ingrediente e NON cercarlo come sottoricetta. Non applicare nuovamente il test dopo averlo già scartato.
+    ⚠️ Se il test FALLISCE, consideralo un normale ingrediente. NON cercarlo come SOTTORICETTA.
 
     ---
-
     ## TEST DI ATTINENZA ALLA VARIANTE (SOLO PER IL TOPIC PRINCIPALE)
     Il topic **'{topic}'** può contenere una variante esplicita (es. “light”, “vegana”, “senza uova”, “al forno”).  
     Prima di accettare un documento (DB o Web) per la ricetta principale, chiediti:
@@ -639,6 +693,11 @@ def krag_research_node(state: Blog_Cucina):
 
     Nel `think_tool`, quando valuti un documento per il topic principale, DICHIARA ESPLICITAMENTE l'esito:
     "Test di attinenza: SUPERATO" oppure "Test di attinenza: FALLITO — [motivo specifico]".
+    🚨 REGOLA FERREA PER VARIANTI ESPLICITE:
+        Se il topic '{topic}' contiene una parola chiave che indica una variante (es. "alla fragola", "light", "vegana", "senza uova", "al forno", "allo zafferano", "ai frutti di mare", "al pistacchio", "al cioccolato"), il documento DEVE menzionare ESPLICITAMENTE quella parola nel titolo, negli ingredienti o nel procedimento.
+        Se la parola chiave NON compare → TEST FALLITO AUTOMATICO.
+        Non cercare di dedurre se la ricetta può essere adattata: attieniti solo a ciò che è scritto.
+        Esempio pratico: per "Tiramisù alla fragola", la parola "fragola" DEVE apparire. Se non appare, il test fallisce e DEVI procedere OBBLIGATORIAMENTE al punto 4 (ricerca web).
 
     ---
 
@@ -649,8 +708,8 @@ def krag_research_node(state: Blog_Cucina):
     - Termina con “STATO: CONTINUO” (o “STATO: FINITO” se hai completato tutto).
 
     2. **QUERY ESPANSA**:
-    - Per ogni NUOVO elemento da cercare (ricetta madre o sottoricetta), chiama `get_ingredienti` UNA volta.
-    - Se ritenti la ricerca dello stesso elemento dopo un fallimento, riutilizza la query già ottenuta senza richiamare `get_ingredienti`.
+    - Per ogni NUOVO elemento da cercare (ricetta madre o sottoricetta), chiama `get_ingredienti` e `get_claim_per_retrieval` UNA volta.
+    - Se ritenti la ricerca dello stesso elemento dopo un fallimento, riutilizza la query già ottenuta senza richiamare `get_ingredienti` e `get_claim_per_retrieval`.
     - Usa sempre la query espansa con `cerca_ricetta_nel_db`.
 
     ---
@@ -660,53 +719,52 @@ def krag_research_node(state: Blog_Cucina):
     ### ▶ FASE 1 – RICERCA DELLA RICETTA PRINCIPALE (TOPIC)
 
     1. **Ottieni query espansa**:
-    - Chiama `get_ingredienti` per `{topic}`.
+    - Chiama `get_ingredienti`  e `get_claim_per_retrieval` per `{topic}`.
     2. **Cerca nel DB**:
     - Usa `cerca_ricetta_nel_db` con la query espansa.
     3. **Valuta il risultato**:
     - ✅ Se TROVATA una ricetta **completa** (ingredienti + procedimento) **E** supera il **TEST DI ATTINENZA ALLA VARIANTE** → memorizza e passa direttamente alla **FASE 2** (è VIETATO cercare sul Web).
     - ❌ Se NON TROVATA, incompleta, o **fallisce il test di attinenza** → chiama `think_tool` per analizzare il fallimento, poi vai al punto 4.
+    ⚠️ REGOLA DI STOP RICERCHE: Una volta che hai trovato una o più ricette madri valide (da DB o Web) per il topic '{topic}', NON cercare ulteriori versioni. Passa immediatamente alla FASE 2 senza ulteriori chiamate a `esegui_ricerca_web` o `cerca_ricetta_nel_db` per la ricetta principale.
     4. **Ricerca Web (solo in caso di fallimento DB)**:
     - Usa `esegui_ricerca_web` per `{topic}` usando la query espansa.
     - Valuta i documenti ottenuti con il **TEST DI ATTINENZA ALLA VARIANTE**.
     - ✅ Se trovi un documento che SUPERA il test → memorizzalo come fonte primaria e passa alla **FASE 2**.
-    - ❌ Se TUTTI i documenti restituiti FALLISCONO il test (es. mostrano solo la versione classica/base):
-            - Chiama `think_tool` e dichiara: "Primo tentativo Web fallito per Test di Attinenza. Riformulo la query per cercare sinonimi e varianti della richiesta."
-            - **Riformula mentalmente la query** (NON chiamare di nuovo `get_ingredienti`). Usa sinonimi o termini equivalenti della variante. Esempi:
-                - "carbonara light" → "carbonara ipocalorica" oppure "carbonara senza sensi di colpa" o "carbonara light ricetta"
-                - "besciamella light" → "besciamella senza burro" o "besciamella leggera" o "besciamella light calorie"
-                - "maionese senza uova" → "maionese vegana" o "finta maionese"
-            - Esegui un **secondo tentativo** con `esegui_ricerca_web` usando la NUOVA query.
+        - ❌ Se TUTTI i documenti restituiti FALLISCONO il test (es. nessuno contiene la variante richiesta o sono tutti fuori tema):
+            - 🚨 REGOLA ASSOLUTA: NON puoi mai arrenderti dopo il primo tentativo. DEVI sempre effettuare un secondo tentativo con una query diversa.
+            - Chiama `think_tool` e dichiara: "Primo tentativo Web fallito per Test di Attinenza. DEVO obbligatoriamente riformulare la query e provare un secondo tentativo."
+            - Riformula mentalmente la query (NON chiamare di nuovo `get_ingredienti`). Usa sinonimi, traduzioni, o varianti della richiesta. Per ricette vegane, prova query come "carbonara vegana ricetta" o "pasta alla carbonara vegana".
+            - Esegui OBBLIGATORIAMENTE il **secondo e ultimo tentativo** con `esegui_ricerca_web` usando la NUOVA query.
             - Valuta nuovamente i documenti con il Test di Attinenza.
             - ✅ Se trovi un documento che SUPERA il test → memorizzalo e passa alla **FASE 2**.
-            - ❌ Se ANCHE il secondo tentativo fallisce → dichiara nel `think_tool`: "FALLIMENTO: nessuna fonte attinente alla variante trovata dopo doppio tentativo Web. Procedo con la fonte classica più vicina ma segnalo esplicitamente la mancata verifica della variante." Quindi usa il miglior documento classico trovato (se esiste) e passa alla **FASE 2**.
+            - ❌ SOLO se ANCHE il secondo tentativo fallisce → puoi dichiarare "FALLIMENTO: Ricetta non disponibile" e terminare con STATO: FINITO.
 
     ---
 
-    ### ▶ FASE 2 – ANALISI DELLE SOTTORICETTE
-    Per ogni documento (DB o Web) della ricetta principale appena acquisito:
+    ### ▶ FASE 2 – ANALISI DELLE SOTTORICETTE (ESEGUI PER OGNI RICETTA MADRE)
+    ⚠️ NON CHIAMARE MAI `get_ingredienti` O `cerca_ricetta_nel_db` USANDO IL NOME DELLA RICETTA MADRE.  
+   
+    Per OGNI Ricetta Madre trovata, esegui questa procedura COMPLETA prima di passare alla successiva:
 
     1. Leggi attentamente ingredienti e procedimento.
-    2. Per ogni elemento complesso, applica il **TEST DELLA SOTTORICETTA**.
-    3. **Nessuna sottoricetta che supera il test** → invoca `think_tool` con “STATO: FINITO per questa Ricetta Madre”.
-    4. **Sottoricette trovate** → per ognuna (usando il suo VERO nome) esegui la **FASE 3**.
-
-    ---
+    2. Applica il TEST DELLA SOTTORICETTA a ogni elemento complesso.
+    3. Esito dell’analisi:
+    - **NESSUNA SOTTORICETTA**: dichiaralo esplicitamente nel think_tool: "Nessuna sottoricetta per [Nome Ricetta Madre]. Passo alla prossima Ricetta Madre (se esiste) o ai claim."
+    - **SOTTORICETTE TROVATE**: astrai il loro VERO NOME e, per OGNUNA di esse, esegui SUBITO la FASE 3 (ricerca). Solo dopo aver completato TUTTE le sottoricette di questa Ricetta Madre, puoi passare alla Ricetta Madre successiva.
+    4. Dopo aver processato TUTTE le Ricette Madri e le loro sottoricette, chiama `get_claim_pertinenti` per '{topic}' per verificare la coerenza con i claim esistenti.
+    - Se un claim contraddice la ricetta o le sottoricette, segnalalo nel `think_tool` e considera la fonte meno affidabile.
+    - Nel `think_tool` DEVI SEMPRE indicare quanti claim hai trovato e se sono coerenti o in conflitto con la ricetta.
+    - Se non ci sono claim pertinenti, dichiara: "Nessun claim pertinente trovato. La ricetta è comunque valida."
 
     ### ▶ FASE 3 – RICERCA DI UNA SOTTORICETTA (loop per ognuna)
-
+    ⚠️ REGOLA ANTI-RITORNO: Dopo aver completato la ricerca di una sottoricetta (CHECK 1, 2), torna alla FASE 2 per verificare se ci sono altre sottoricette per la STESSA Ricetta Madre. NON passare a una nuova Ricetta Madre e NON cercare di nuovo la ricetta principale finché non hai completato tutte le sottoricette di quella corrente.
     **CHECK 1 – DB LOCALE (priorità assoluta)**
     1. Se è la prima volta, chiama `get_ingredienti` per la sottoricetta.
     2. Cerca con `cerca_ricetta_nel_db` usando la query espansa.
     3. ✅ **Trovata completa** → memorizza, sottoricetta RISOLTA. Passa alla prossima.
     ❌ **Non trovata o incompleta** → vai al CHECK 2.
 
-    **CHECK 2 – CORTOCIRCUITO CON LA RICETTA MADRE** (obbligatorio, prima del Web)
-    - Invoca `think_tool` e rileggi la Ricetta Madre già in memoria.
-    - Se contiene ingredienti E procedimento chiari per questa sottoricetta: **CORTOCIRCUITO RIUSCITO** → sottoricetta risolta, passa alla prossima.
-    - Altrimenti: **CORTOCIRCUITO FALLITO** → vai al CHECK 3.
-
-    **CHECK 3 – RICERCA WEB (ultima spiaggia)**
+    **CHECK 2 – RICERCA WEB (ultima spiaggia)**
     1. Usa `esegui_ricerca_web` per la sottoricetta.
     2. ✅ **Trovata** → memorizza, RISOLTA.
     ❌ **Non trovata** → dichiara “FALLIMENTO: [Nome] non trovata né in DB né in Web. ABBANDONO il ramo.” Passa alla prossima.
@@ -801,9 +859,36 @@ def validator_node(state: Blog_Cucina):
             for idx, doc in enumerate(dati_web_grezzi)
         )
 
-    # ── PRIMA PASSATA: messaggi vuoti → manda al think_tool ──
-    if not messaggi:
+    # Controllo se abbiamo già chiamato get_claim_pertinenti
+    claim_ok = any(
+        isinstance(m, ToolMessage) and m.name == "get_claim_pertinenti"
+        for m in messaggi
+    )
 
+    # ── PASSO 1: messaggi vuoti → l'agente chiama get_claim_pertinenti ──
+    if not messaggi:
+        prompt_riflessione = f"""
+        Sei un Validatore Supremo. Prima di tutto, chiama `get_claim_pertinenti` per '{topic}'.
+        NON chiamare altri tool adesso.
+        """
+        messaggio = [
+            SystemMessage(content=prompt_riflessione),
+            HumanMessage(content=f"Recupera i claim pertinenti per '{topic}'."),
+        ]
+        risposta = llm_con_tools.invoke(messaggio)
+        return {"messages": [risposta], "nodo_chiamante": "validator"}
+
+    # ── PASSO 2: claim ricevuti → ora l'agente può usare think_tool e poi dare il verdetto ──
+    # (unica chiamata in più rispetto al flusso originale)
+    if claim_ok and not any(
+        isinstance(m, ToolMessage) and m.name == "think_tool" for m in messaggi
+    ):
+        # Estrai il contenuto dei claim
+        claim_text = ""
+        for msg in messaggi:
+            if isinstance(msg, ToolMessage) and msg.name == "get_claim_pertinenti":
+                claim_text = msg.content
+                break
         prompt_riflessione = f"""
         Sei un Validatore Supremo esperto di ricettari e un rigoroso risolutore di dipendenze. 
         Ti sono stati forniti ESATTAMENTE {totale_doc} documenti in totale (tra DB locale e WEB).
@@ -811,6 +896,11 @@ def validator_node(state: Blog_Cucina):
         🚨 ALLERTA ROSSA: QUESTA È L'UNICA INTERAZIONE CHE AVRAI. NON CI SARÀ NESSUN "PROSSIMO TURNO".
         DEVI ESEGUIRE TUTTE E 3 LE FASI ORA, ALL'INTERNO DI QUESTA SINGOLA CHIAMATA AL TOOL.
         USARE "STATO: CONTINUO" È UN ERRORE FATALE CHE COMPROMETTERÀ IL SISTEMA.
+
+        Ecco i claim pertinenti che hai appena recuperato:
+        {claim_text}
+
+        Ora analizza i claim e confrontali con i documenti, quindi usa il `think_tool` per esprimere la tua valutazione COMPLETA.
 
         Compila i 3 campi del `think_tool` SEGUENDO TASSATIVAMENTE QUESTE ISTRUZIONI:
 
@@ -832,6 +922,7 @@ def validator_node(state: Blog_Cucina):
           ID_DOC [TITOLO]: Score X - Motivo: ...
         - Dopo aver scritto l'elenco completo, DEVI CONCLUDERE TASSATIVAMENTE CON: "STATO: FINITO".
 
+        
         === DOCUMENTI DA VALUTARE ===
         [DB LOCALE]
         {testo_db}
@@ -1032,10 +1123,25 @@ def writer_node(state):
             blocco_correlati = "\n".join(righe_correlati)
         else:
             blocco_correlati = "Nessun topic correlato trovato nel Knowledge Graph."
-
+        try:
+            claims_semantici = kg_client.get_claim_pertinenti(topic)
+            if claims_semantici:
+                blocco_claim_semantici = (
+                    "=== CLAIM SEMANTICAMENTE PERTINENTI DAL KNOWLEDGE GRAPH ===\n"
+                )
+                for i, c in enumerate(claims_semantici, 1):
+                    blocco_claim_semantici += f"{i}. [{c['topic_correlato']}] (sim: {c['similarità']})\n   \"{c['claim']}\"\n"
+                blocco_claim_semantici += "\n"
+            else:
+                blocco_claim_semantici = ""
+        except Exception as e:
+            blocco_claim_semantici = ""
+            print(f"[WRITER] Errore recupero claim semantici: {e}")
+        num_claim_sem = len(claims_semantici) if claims_semantici else 0
         print(
             f"[WRITER] KG: stile={'ok' if style else 'vuoto'} | "
-            f"claim_post={len(claim_correlati)} | correlati={len(topic_correlati)}"
+            f" | claim_post={len(claim_correlati)} | correlati={len(topic_correlati)}"
+            f"claim_semantici={num_claim_sem} trovati"
         )
 
     except Exception as e:
@@ -1085,7 +1191,8 @@ def writer_node(state):
 
         [CLAIM GIÀ PUBBLICATI — richiamali esplicitamente se pertinenti, evita di ripeterli]
         {blocco_claim}
-
+        [CLAIM SEMANTICAMENTE PERTINENTI — usali per collegamenti o approfondimenti]
+        {blocco_claim_semantici if blocco_claim_semantici else "Nessun claim semantico aggiuntivo."}
         [TOPIC CON INGREDIENTI IN COMUNE — puoi creare rimandi a questi post correlati]
         {blocco_correlati}
 
@@ -1094,22 +1201,25 @@ def writer_node(state):
         ========================================================================
 
         1. COERENZA EDITORIALE (usa il contesto KG):
-        - Se un claim di un post precedente è pertinente al topic corrente, citalo
+       - Se un claim di un post precedente è pertinente al topic corrente, citalo
             esplicitamente nell'introduzione o nei passaggi (es. "Come abbiamo visto
             nel post sulla Besciamella..."). Non inventare rimandi: usa solo quelli
             che trovi nel blocco CLAIM GIÀ PUBBLICATI.
+        - Se sono presenti CLAIM SEMANTICAMENTE PERTINENTI, usali come ulteriore
+            fonte di ispirazione per creare collegamenti con altri post del blog.
         - Se esiste un topic correlato (ingredienti in comune), puoi aggiungere
             un breve rimando alla fine dell'introduzione (es. "Se ami questo piatto,
             potresti trovare interessante anche la nostra ricetta di X").
         - Rispetta SEMPRE il tono, il registro e la lunghezza target indicati
-            nelle linee guida stilistiche.
+            nelle linee guida stilistiche
 
         2. RIGORE STRUTTURALE (coesione ricetta → sottoricette):
         - Il tuo output deve rispecchiare fedelmente l'albero delle dipendenze
             stabilito nelle tracce di ragionamento.
         - Se il ragionamento indica che un ingrediente (es. Besciamella, Ragù)
             è una SOTTORICETTA autonoma, mappala interamente in 'sotto_ricette'
-            estraendo i suoi ingredienti dal testo della fonte.
+            estraendo i suoi ingredienti dal testo della fonte
+        - ELIMINA TUTTI gli ingredienti della sottoricetta dagli ingredienti diretti della ricetta madre.
         - È VIETATO lasciare una sottoricetta complessa come stringa piatta
             negli ingredienti diretti della ricetta madre.
 
@@ -1123,6 +1233,8 @@ def writer_node(state):
         - Non creare oggetti SottoRicetta per ingredienti pronti o topping che
             non subiscono trasformazione (es. parmigiano da spolverare, prosciutto
             pronto): questi vanno negli ingredienti diretti.
+        - Non creare MAI una SottoRicetta per bagne, sciroppi, succhi di frutta, o qualsiasi liquido dolce preparato al momento (es. "Bagna di Fragole", "Bagna al Caffè", "Sciroppo di Zucchero"). 
+            Questi vanno descritti direttamente nei passaggi della preparazione principale
 
         5. DETTAGLIO DELLA PREPARAZIONE:
         - Elenca i passaggi in modo esteso, analitico e sequenziale.
@@ -1267,22 +1379,42 @@ def kg_update_node(state: Blog_Cucina):
     # 3. ESTRAZIONE RADICE ONTOLOGICA
     # ==========================================
     prompt_estrazione_radice = f"""
-   
-   Sei un tassonomista culinario. Devi identificare la RADICE MADRE di una ricetta.
-REGOLE (in ordine di priorità):
-1. Se il nome contiene una MODIFICA DIETETICA o DI COTTURA (light, senza, vegana, al forno, integrale, dietetica, etc.), la radice è il nome SENZA quella parola.
-   Esempi: "Carbonara light" -> "Carbonara"; "Pasta alla carbonara light" -> "Pasta alla carbonara"; "Tiramisù senza mascarpone" -> "Tiramisù".
-2. Se il nome è una VARIANTE GUSTO di una base neutra (es. gusti di pizza, sughi per pasta, tipi di risotto), la radice è il nome della base.
-   Esempi: "Pizza capricciosa" -> "Pizza"; "Risotto ai funghi" -> "Risotto"; "Sugo all'arrabbiata" -> "Sugo di pomodoro".
-3. Se il nome è un PIATTO AUTONOMO, non derivato da un altro (es. "Bruschette al pomodoro", "Caponata", "Tiramisù" classico), la radice è il nome stesso.
-   Attenzione: "Tiramisù" è autonomo, ma "Tiramisù al pistacchio" è una variante gusto -> radice "Tiramisù".
-4. In caso di dubbio, applica la regola 1 o 2 se riconosci una parola chiave, altrimenti usa il nome stesso.
+ Sei un tassonomista culinario. Devi identificare la **RADICE MADRE** di una ricetta, cioè il piatto base da cui quella specifica versione deriva.
 
-Ora analizza: '{topic_finale}'
+**REGOLE RIGIDE (in ordine di priorità):**
 
-Rispondi SOLO con il nome della radice madre, senza commenti o spiegazioni.
+1. **Modifiche dietetiche o di cottura**  
+   Se il nome contiene una parola che indica una MODIFICA DIETETICA o DI COTTURA riconoscibile (es. "light", "vegana", "senza glutine", "senza uova", "senza lattosio", "integrale", "al forno", "fritta"), elimina quella parola.  
+   *Esempi:*  
+   - "Carbonara light" → "Carbonara"  
+   - "Tiramisù vegano" → "Tiramisù"  
+   - "Melanzane alla parmigiana al forno" → "Melanzane alla parmigiana"  
 
-'"""
+2. **Varianti di gusto / condimento su una base neutra**  
+   Se il nome è composto da un PIATTO BASE NEUTRO (che può esistere da solo) + un complemento di gusto/condimento (es. "alla fragola", "al pistacchio" ), la radice è il piatto base.  
+   *Attenzione:* la base deve essere un piatto autonomo, riconoscibile e comunemente declinato in più gusti. Rientrano in questa categoria: **Pizza,  Gelato, Tiramisù, Panna cotta, Crostata, Torta (semplice), Focaccia, ecc.**  
+   *Esempi:*  
+   - "Tiramisù alla fragola" → "Tiramisù"   
+   - "Pizza capricciosa" → "Pizza"  
+   - "Gelato al pistacchio" → "Gelato"  
+
+3. **Piatti autonomi non derivati**  
+   Se il nome è un piatto completo e specifico che non rappresenta una variante di gusto di una base neutra, ma ha una propria identità (es. "Pasta alla carbonara", "Bruschette al pomodoro", "Caponata", "Pollo al limone", "Lasagne alla bolognese"), la radice è il nome stesso.  
+   *Esempi:*  
+   - "Pasta alla carbonara" → "Pasta alla carbonara" (non si riduce a "Pasta")  
+   - "Bruschette al pomodoro" → "Bruschette al pomodoro"  
+   - "Caponata" → "Caponata"  
+
+4. **Casi ambigui: verifica della base**  
+   Dopo aver applicato una rimozione (regola 1 o 2), controlla se il nome risultante è un piatto noto e autonomo. Se non lo è, **mantieni il nome originale** (non forzare l'estrazione).  
+   *Esempio:* "Pasta al pesto" non diventa "Pasta" perché "Pasta" da sola non è un piatto specifico; la radice rimane "Pasta al pesto".  
+
+5. **In caso di dubbio, applica la regola 1 o 2 solo se la parola chiave è chiaramente una modifica o un gusto noto, altrimenti lascia il nome invariato.**
+
+Ora analizza: **'{topic_finale}'**
+
+Rispondi **SOLO** con il nome della radice madre, senza commenti o spiegazioni.
+"""
 
     risultato_originale = llm_structured.invoke(
         [HumanMessage(content=prompt_estrazione_radice)]

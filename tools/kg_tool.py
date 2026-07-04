@@ -48,7 +48,6 @@ def controlla_storico_post(topic: str) -> str:
 @tool
 def get_ingredienti(nome_ricetta: str) -> str:
     """
-    Tool FONDAMENTALE da usare SOLO quando controlla_storico_post ti dice che un topic è BLOCCATO.
     Interroga il Knowledge Graph per estrarre gli ingredienti principali del piatto bloccato.
     Analizzando questi ingredienti nel tuo think_tool, potrai decidere in autonomia se
     creare una 'Variante' o una 'Ricetta Simile'.
@@ -56,8 +55,55 @@ def get_ingredienti(nome_ricetta: str) -> str:
     ingredienti = kg_client.espandi_query_per_krag(nome_ricetta)
 
     if not ingredienti:
+        print(f"[TOOL] Nessun dettaglio trovato nel grafo per '{nome_ricetta}'.")
         return f"Nessun dettaglio/ingrediente trovato nel grafo per '{nome_ricetta}'. Sii creativo."
 
     # Restituisce una stringa chiara per l'LLM
     elenco = ", ".join(ingredienti)
+    print(f"[TOOL] Ingredienti principali per '{nome_ricetta}': {elenco}")
     return f"DATI ESTRATTI PER '{nome_ricetta}': Gli ingredienti principali sono [{elenco}]."
+
+
+@tool
+def get_claim_pertinenti(topic: str) -> str:
+    """
+    Recupera i claim più semanticamente vicini a un determinato topic
+    dal Knowledge Graph. Utile per verificare la coerenza di nuove ricette
+    con contenuti già pubblicati, o per creare collegamenti editoriali.
+    """
+    print(f"[TOOL] get_claim_pertinenti chiamato per: '{topic}'")
+    try:
+        claims = kg_client.get_claim_pertinenti(topic)
+        if not claims:
+            print("[TOOL] Nessun claim trovato.")
+            return "NESSUN_CLAIM: Nessun claim pertinente trovato nel Knowledge Graph."
+
+        risultato = "=== CLAIM PERTINENTI ===\n"
+        for i, c in enumerate(claims, 1):
+            risultato += f"{i}. [{c['topic_correlato']}] (sim: {c['similarità']})\n   \"{c['claim']}\"\n\n"
+
+        return risultato.strip()
+    except Exception as e:
+        print(f"[TOOL] ERRORE: {e}")
+        return f"ERRORE: Impossibile recuperare i claim: {str(e)}"
+
+
+@tool
+def get_claim_per_retrieval(nome_elemento: str) -> str:
+    """Recupera claim tecnici direttamente dai nodi Claim per arricchire la query RAG."""
+    print(f"[TOOL] get_claim_per_retrieval chiamato per: '{nome_elemento}'")
+    try:
+        claims = kg_client.get_claim_per_retrieval(nome_elemento)
+        if not claims:
+            print("[TOOL] Nessun claim tecnico trovato.")
+            return "NESSUN_CLAIM_TECNICO"
+
+        risultato = "=== CLAIM TECNICI PERTINENTI ===\n"
+        for i, c in enumerate(claims, 1):
+            risultato += f"{i}. [{c['topic_correlato']}] (sim: {c['similarita']})\n   \"{c['claim']}\"\n\n"
+        print(f"[TOOL] Restituiti {len(claims)} claim tecnici.")
+        print(f"[TOOL] Risultato:\n{risultato}")
+        return risultato.strip()
+    except Exception as e:
+        print(f"[TOOL] ERRORE: {e}")
+        return f"ERRORE: {e}"

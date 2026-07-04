@@ -81,15 +81,35 @@ estrattore_web = llm_estrazione.with_structured_output(ContenutoWebEstratto)
 
 def ottimizza_query_ricerca(query_originale: str) -> str:
     prompt = f"""
-    Analizza questa query di ricerca culinaria: '{query_originale}'
-    Il tuo compito è trasformarla in una query ottimizzata per motori di ricerca.
+    Sei un esperto di search engine optimization per ricette culinarie.
+    Il tuo compito è trasformare una query di ricerca in una versione ottimizzata per motori di ricerca, in lingua italiana.
 
-    === REGOLE DI TRASFORMAZIONE ===
-    1. SE la query indica esplicitamente una base PER un piatto finale (es. 'ragù per lasagne', 'besciamella per cannelloni', 'glassa per torta'), isola la base e rimuovi il piatto finale (es. diventa 'ricetta ragù di carne classico').
-    2. SE INVECE la query è il nome di un piatto completo,  (es. 'ganache al cioccolato', 'lasagne al pesto','pizza capricciosa','insalata di quinoa'), MANTIENI il nome intatto senza rimuovere nulla.
-    3. AGGIUNGI SEMPRE alla fine le parole "ricetta completa in italiano" per forzare i risultati.
+    **Query originale:** "{query_originale}"
 
-    Rispondi SOLO con la query ottimizzata, senza commenti o virgolette.
+    **REGOLE RIGOROSE (applica nell'ordine):**
+
+    1. **PIATTO BASE vs PREPARAZIONE**
+       - Se la query descrive una preparazione per un piatto finale (es. "ragù per lasagne", "besciamella per cannelloni"), isola la preparazione e rimuovi il piatto finale. Aggiungi "ricetta" all'inizio.
+         Esempi:
+         - "ragù per lasagne" → "ricetta ragù di carne classico"
+         - "besciamella per cannelloni" → "ricetta besciamella classica"
+       - Se invece è un piatto autonomo (es. "ganache al cioccolato", "lasagne al pesto", "pizza capricciosa"), mantieni il nome completo senza rimuovere parti.
+
+    2. **RILEVAZIONE E ESPANSIONE DELLA VARIANTE (FONDAMENTALE)**
+       - Se la query originale contiene una VARIANTE ESPLICITA (es. "light", "senza uova", "vegana", "senza glutine", "senza lattosio", "al forno", "fritta", "allo zafferano"), devi **rafforzarla** aggiungendo **almeno due sinonimi o espressioni equivalenti** subito dopo il nome della ricetta, separati da spazi.
+       - Esempi di espansione:
+         - "carbonara light" → "carbonara light ipocalorica light ricetta leggera"
+         - "besciamella light" → "besciamella light senza burro leggera light"
+         - "tiramisù senza glutine" → "tiramisù senza glutine per celiaci senza glutine"
+        SE la query contiene la parola "vegana" o "vegano", NON aggiungere "senza uova" o "senza latticini": la parola "vegana" è già sufficiente.
+            Esempio: "carbonara vegana" → "carbonara vegana ricetta" (senza ulteriori espansioni).
+       - Se la variante NON è presente, NON aggiungere nulla.
+
+    3. **AGGIUNTA FINALE**
+       - Termina SEMPRE la query con le parole: "ricetta completa in italiano"
+
+    **FORMATO DI RISPOSTA:**
+    Restituisci ESCLUSIVAMENTE la query ottimizzata, senza virgolette, senza spiegazioni, senza commenti. Solo la stringa.
     """
     return llm_estrazione.invoke(prompt).content
 

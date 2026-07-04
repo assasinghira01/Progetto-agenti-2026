@@ -39,7 +39,7 @@ def think_tool(
             devi ottenere ESATTAMENTE 3 topic approvati.
             - Se stai lavorando su un POST SINGOLO (qualsiasi altro input):
             devi ottenere ESATTAMENTE 1 topic approvato.
-            - il tuo compito è solo pianificare. Non DEVI MAI effettuare ricerche sul db e sul web. utilizza solo i dati
+            - Il tuo compito è solo pianificare. Non DEVI MAI effettuare ricerche sul db e sul web. utilizza solo i dati
               in tuo possesso
 
         UTILIZZO DI "STATO: CONTINUO"
@@ -107,9 +107,9 @@ def think_tool(
         - Non fermarti finché non hai processato TUTTE le Ricette Madri trovate.
 
         ####  GESTIONE DELLE QUERY ESPANSE
-        - Per OGNI nuovo elemento (Ricetta Madre o sottoricetta), chiama `get_ingredienti` UNA VOLTA.
+        - Per OGNI nuovo elemento (Ricetta Madre o sottoricetta), chiama `get_ingredienti` e `get_claim_per_retrieval` UNA VOLTA.
         - Usa il risultato per costruire una query espansa per `cerca_ricetta_nel_db`.
-        - Se stai ritentando lo STESSO elemento, riutilizza la query senza chiamare di nuovo `get_ingredienti`.
+        - Se stai ritentando lo STESSO elemento, riutilizza la query senza chiamare di nuovo `get_ingredienti` e `get_claim_per_retrieval`.
 
 
         #### REGOLE
@@ -163,6 +163,17 @@ def think_tool(
         svolto, all'interno dei tre campi del think_tool, le seguenti operazioni
         nell'ordine indicato:
 
+        ⚠️ COERENZA CON I CLAIM DEL KNOWLEDGE GRAPH
+        Se nel contesto della validazione ti vengono forniti dei **CLAIM PERTINENTI DAL
+        KNOWLEDGE GRAPH**, usali come ulteriore criterio di qualità e coerenza.
+        - Confronta i documenti con i claim: se un documento approvato contraddice un
+          claim già pubblicato sul blog, segnalalo esplicitamente nell'analisi e motiva
+          perché lo accetti comunque o lo scarti.
+        - Un conflitto grave (es. ingrediente principale diverso, tecnica opposta) deve
+          influenzare il punteggio (Score) del documento o, se insanabile, portare alla
+          sua esclusione.
+        - Se non ci sono claim, procedi come al solito.
+
         ▶ NEL CAMPO 'analisi_contesto' (FASE 1 & 2):
             1. Eleggi la MIGLIORE "Ricetta Madre" tra tutti i documenti che parlano
                 del topic principale. Assegna a questa Score 1. Assegna Score 0 a tutte
@@ -171,9 +182,12 @@ def think_tool(
                 estrai l'elenco delle sottoricette strettamente necessarie per realizzarla
                 (es. besciamella, ragù). Non elencare mai gli ingredienti, solo le
                 preparazioni derivate.
+            3. Se sono presenti CLAIM PERTINENTI DAL KNOWLEDGE GRAPH, confrontali con
+                la Ricetta Madre scelta: segnala eventuali conflitti e spiega perché
+                la ricetta rimane valida o deve essere declassata
 
         ▶ NEL CAMPO 'valutazione_opzioni' (FASE 3):
-            3. Prendi in esame TUTTI i documenti forniti, anche quelli che hai già
+            4. Prendi in esame TUTTI i documenti forniti, anche quelli che hai già
                 esaminato nella FASE 1. Devi esaminarli UNO PER UNO, seguendo l'ordine
                 esatto degli ID (DB_DOC_0, DB_DOC_1, ..., WEB_DOC_0, ...).
                 Per ciascun documento:
@@ -182,20 +196,20 @@ def think_tool(
                 Score 0 agli altri duplicati inferiori.
                 - Se il documento è irrilevante, fuori tema o non serve, assegna Score 0
                 con motivazione esplicita.
-            4. **NON PUOI SALTARE NESSUN DOCUMENTO**. Ogni ID che ti è stato fornito
+            5. **NON PUOI SALTARE NESSUN DOCUMENTO**. Ogni ID che ti è stato fornito
                 deve comparire nella valutazione e poi nell'elenco finale.
 
         ▶ NEL CAMPO 'decisione_finale' (VERDETTO):
-            5. Scrivi l'elenco FISICO ED ESATTO di TUTTI i documenti valutati,
+            6. Scrivi l'elenco FISICO ED ESATTO di TUTTI i documenti valutati,
                 uno per riga, nel formato obbligatorio:
                 ID_DOC [TITOLO]: Score X - Motivo: ...
-            6. L'elenco DEVE contenere ESATTAMENTE il numero di documenti che ti sono
+            7. L'elenco DEVE contenere ESATTAMENTE il numero di documenti che ti sono
                 stati forniti. Non puoi ometterne nessuno.
-            7. Rispetta rigorosamente l'ordine e gli ID originali con cui i documenti
+            8. Rispetta rigorosamente l'ordine e gli ID originali con cui i documenti
                 ti sono stati presentati (es. DB_DOC_0, DB_DOC_1, WEB_DOC_0, WEB_DOC_1).
-            8. **Prima di scrivere "STATO: FINITO", conta le righe del tuo elenco e
+            9. **Prima di scrivere "STATO: FINITO", conta le righe del tuo elenco e
                 verifica che corrispondano al numero totale di documenti indicato all'inizio.**
-            9. Subito dopo l'ultima riga, scrivi "STATO: FINITO".
+            10. Subito dopo l'ultima riga, scrivi "STATO: FINITO".
 
         RICORDA: Omettere un documento è un ERRORE CRITICO. Anche i documenti con
         Score 0 devono apparire nella lista.

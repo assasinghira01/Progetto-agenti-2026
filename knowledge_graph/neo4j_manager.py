@@ -3,6 +3,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from neo4j import GraphDatabase
 from datetime import datetime
 from langchain_core.messages import HumanMessage
+from regex import sub
 
 
 class CucinaKnowledgeGraph:
@@ -16,6 +17,7 @@ class CucinaKnowledgeGraph:
 
         # Creiamo l'indice vettoriale
         self._crea_indice_vettoriale()
+        self._crea_indice_claim()
 
     def _crea_indice_vettoriale(self):
         """Prepara il database a grafo per la ricerca semantica."""
@@ -32,6 +34,24 @@ class CucinaKnowledgeGraph:
             print(
                 " [NEO4J] Indice vettoriale 'recipe_embedding_index' verificato/creato."
             )
+
+    def _crea_indice_claim(self):
+        """
+        Indice vettoriale diretto sui nodi Claim.
+        Permette ricerche semantiche sul testo dei claim senza passare
+        per le ricette — più preciso e più veloce di get_claim_pertinenti.
+        """
+        query = """
+        CREATE VECTOR INDEX claim_embedding_index IF NOT EXISTS
+        FOR (c:Claim) ON (c.embedding)
+        OPTIONS {indexConfig: {
+          `vector.dimensions`: 1024,
+          `vector.similarity_function`: 'cosine'
+        }}
+        """
+        with self.driver.session() as session:
+            session.run(query)
+            print(" [NEO4J] Indice 'claim_embedding_index' verificato/creato.")
 
     def init_blog_style(
         self,
@@ -433,7 +453,24 @@ class CucinaKnowledgeGraph:
                     print(
                         f"[NEO4J] Registrata variante interna: '{sub_nome}' -> '{sub_classe}'"
                     )
-
+                #  SALVATAGGIO INGREDIENTI SOTTORICETTA -----
+                ingredienti_sub = sub.get("ingredienti", [])
+                if ingredienti_sub:
+                    session.run(
+                        """
+                            MATCH (specifica_sub:Ricetta { name: $nome_specifico })
+                            UNWIND $ingredienti AS ing
+                            MERGE (i:Ingrediente { name: toLower(trim(ing.nome)) })
+                            MERGE (specifica_sub)-[rel:CONTIENE]->(i)
+                            SET rel.quantita = ing.quantita
+                            SET rel.fase = ing.fase_utilizzo
+                            """,
+                        nome_specifico=sub_nome,
+                        ingredienti=ingredienti_sub,
+                    )
+                print(
+                    f"[NEO4J] {len(ingredienti_sub)} ingredienti salvati per la sottoricetta '{sub_nome}'."
+                )
             if sotto_ricette:
 
                 print(f"[NEO4J] " f"{len(sotto_ricette)} " f"sottoricette salvate.")
@@ -452,32 +489,40 @@ class CucinaKnowledgeGraph:
                         )
                 print(f"[NEO4J] {len(fonte)} fonti registrate.")
 
-            # ==================================================
-            # CLAIM — estratti dal testo del post tramite LLM
-            # ==================================================
+                # ──────────────────────────────────────────────────────
+            # CLAIM — estratti + embedding + salvataggio
+            # ──────────────────────────────────────────────────────
             if testo_post and llm:
-                claim_estratti = self._estrai_claim(testo_post, topic_finale, llm)
+                claim_estratti = self._estrai_claim(testo_post, op_finale, llm)
 
                 if claim_estratti:
-                    session.run(
-                        """
-                        MATCH (p:Post { titolo: $titolo })
-                        UNWIND $claims AS testo_claim
-                        CREATE (c:Claim { testo: testo_claim })
-                        MERGE (p)-[:HA_CLAIM]->(c)
-                        """,
-                        titolo=titolo_post,
-                        claims=claim_estratti,
-                    )
+                    for testo_claim in claim_estratti:
+                        # Calcoliamo l'embedding del testo del claim
+                        # per abilitare la ricerca diretta con claim_embedding_index
+                        vettore_claim = self.embeddings.embed_query(testo_claim)
+
+                        session.run(
+                            """
+                            MATCH (p:Post { titolo: $titolo })
+                            CREATE (c:Claim {
+                                testo:     $testo,
+                                embedding: $embedding
+                            })
+                            MERGE (p)-[:HA_CLAIM]->(c)
+                            """,
+                            titolo=titolo_post,
+                            testo=testo_claim,
+                            embedding=vettore_claim,
+                        )
+
                     print(
-                        f"[NEO4J] {len(claim_estratti)} claim salvati per '{titolo_post}'."
+                        f"[NEO4J] {len(claim_estratti)} claim salvati con embedding "
+                        f"per '{titolo_post}'."
                     )
                 else:
-                    print(
-                        "[NEO4J] Nessun claim estratto (testo vuoto o LLM non disponibile)."
-                    )
+                    print("[NEO4J] Nessun claim estratto.")
 
-        print(f"[NEO4J] Post '{titolo_post}' " f"salvato correttamente.")
+        print(f"[NEO4J] Post '{titolo_post}' salvato correttamente.")
 
     def _estrai_claim(self, testo_post: str, topic: str, llm) -> list[str]:
         """
@@ -487,14 +532,16 @@ class CucinaKnowledgeGraph:
         """
         prompt = f"""
         Leggi il seguente post di un blog di cucina sul tema '{topic}'.
-        Estrai esattamente 3-5 CLAIM CHIAVE: affermazioni fattuali, tecniche o culturali
+        Estrai esattamente 3-5 CLAIM CHIAVE: affermazioni fattuali o culturali, il procedimento tecnico riassunto della sottoricetta
         brevi (max 25 parole ciascuna) che potrebbero essere richiamate o referenziate
         in futuri post per creare coerenza editoriale.
 
         Esempi di claim ben formati:
-        - "La besciamella richiede un roux di burro e farina in parti uguali."
+        - "La besciamella richiede una noce di burro e farina in parti uguali."
+        - "Il ragù alla bolognese tradizionale cuoce lentamente per almeno 3 ore."
         - "La pasta alla norma è un primo piatto tradizionale catanese con melanzane fritte."
-        - "Il ragù siciliano si distingue da quello bolognese per l'uso del vino bianco."
+        - "Il pesto genovese frulla il basilico e unisce pinoli, aglio, parmigiano e olio d'oliva."
+     
 
         Rispondi SOLO con una lista Python valida di stringhe, senza altro testo.
         Esempio: ["claim 1", "claim 2", "claim 3"]
@@ -526,6 +573,104 @@ class CucinaKnowledgeGraph:
             print(f"[NEO4J] Errore estrazione claim: {e}")
 
         return []
+
+    def get_claim_pertinenti(self, topic: str, soglia: float = 0.62, limite: int = 5):
+        """
+        Recupera i claim più semanticamente vicini al topic dal Knowledge Graph.
+        """
+        vettore_topic = self.embeddings.embed_query(topic.strip())
+
+        query = """
+        CALL db.index.vector.queryNodes('recipe_embedding_index', $limite, $vettore)
+        YIELD node AS r, score
+        WHERE score > $soglia
+        MATCH (p:Post)-[:PARLA_DI]->(r)
+        MATCH (p)-[:HA_CLAIM]->(c:Claim)
+        RETURN r.name AS topic_correlato, c.testo AS claim_testo, score
+        ORDER BY score DESC
+        LIMIT $limite
+        """
+
+        with self.driver.session() as session:
+            risultati = session.run(
+                query, vettore=vettore_topic, soglia=soglia, limite=limite
+            )
+
+            claims = []
+            for record in risultati:
+                claims.append(
+                    {
+                        "topic_correlato": record["topic_correlato"],
+                        "claim": record["claim_testo"],
+                        "similarità": round(record["score"], 4),
+                    }
+                )
+
+            print(f"[NEO4J] Estratti {len(claims)} claim pertinenti a '{topic}'.")
+            print(f"[NEO4J] Claim trovati: {claims}")
+            return claims
+
+    def get_claim_per_retrieval(
+        self, topic: str, soglia: float = 0.80, limite: int = 5
+    ):
+        """
+        Recupera claim tecnici cercando DIRETTAMENTE nello spazio vettoriale
+        dei claim (indice claim_embedding_index), senza passare per le ricette.
+
+        Differenza chiave rispetto a get_claim_pertinenti:
+          - get_claim_pertinenti: cerca ricette simili per nome → poi prende i loro claim
+            (utile per contesto editoriale, ma limitato alla similarità di nome)
+          - get_claim_per_retrieval: cerca claim il cui TESTO è semanticamente
+            vicino al topic → trova anche claim di preparazioni correlate con nome
+            diverso (es. cerca "Cannelloni" → trova claim su "Besciamella" e "Ragù"
+            perché il loro testo parla di tecniche usate nei Cannelloni)
+
+        Usato nel research node per arricchire la query HyDE prima del retrieval
+        su ChromaDB. Soglia più alta (0.72) perché qui vogliamo precisione,
+        non ampiezza.
+
+        Args:
+            topic: Il nome della ricetta o sottoricetta da cercare.
+            soglia: Soglia minima di similarità coseno (default 0.72).
+            limite: Numero massimo di claim da restituire (default 5).
+
+        Returns:
+            Lista di dizionari con chiavi: claim, topic_correlato, similarita.
+        """
+        vettore_topic = self.embeddings.embed_query(topic.strip())
+
+        query = """
+        CALL db.index.vector.queryNodes('claim_embedding_index', $limite, $vettore)
+        YIELD node AS c, score
+        WHERE score > $soglia
+        MATCH (p:Post)-[:HA_CLAIM]->(c)
+        MATCH (p)-[:PARLA_DI]->(r:Ricetta)
+        RETURN c.testo AS claim,
+               r.name  AS topic_correlato,
+               score   AS similarita
+        ORDER BY score DESC
+        LIMIT $limite
+        """
+
+        with self.driver.session() as session:
+            risultati = session.run(
+                query, vettore=vettore_topic, soglia=soglia, limite=limite
+            )
+            claims = []
+            for record in risultati:
+                claims.append(
+                    {
+                        "claim": record["claim"],
+                        "topic_correlato": record["topic_correlato"],
+                        "similarita": round(record["similarita"], 4),
+                    }
+                )
+
+            print(
+                f"[NEO4J] get_claim_per_retrieval: {len(claims)} claim tecnici "
+                f"trovati per '{topic}' (ricerca diretta sui claim)."
+            )
+            return claims
 
     def __del__(self):
         """Si attiva automaticamente quando l'oggetto viene rimosso dalla memoria."""

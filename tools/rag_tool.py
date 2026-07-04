@@ -43,9 +43,9 @@ def cerca_ricetta_nel_db(query: str) -> str:
     La tua query deve essere un paragrafo discorsivo generato seguendo rigorosamente UNA di queste due casistiche:
 
     CASO A - K-RAG PURO (Se hai estratto dati dal Knowledge Graph in precedenza):
-    Se possiedi già una lista di ingredienti o concetti storici recuperati dal grafo, la tua query DEVE
-    contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici.
-    Sei autorizzato a inventare solo il procedimento tecnico (es. frullare, infornare) per legare le parole.
+    Se possiedi già una lista di ingredienti o claim recuperati dal grafo, la tua query DEVE
+    contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici e claim recuperati.
+    Il procedimento tecnico deve riguardare  SOLO i claim recuperati.
 
     CASO B - HyDE FALLBACK (Se il Knowledge Graph era vuoto o non hai dati pregressi):
     Se il piatto è inedito, devi allucinare tu l'intero documento. La tua query DEVE contenere:
@@ -54,7 +54,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
     3. Un mini-procedimento tecnico discorsivo.
 
     ESEMPIO DI QUERY CORRETTA E RIGOROSA CHE DEVI EMULARE:
-    "Ricetta completa per la maionese. Ingredienti: tuorli d'uovo, olio di semi, succo di limone, sale. Procedimento: Mettere i tuorli in una ciotola, aggiungere il limone e frullare versando l'olio a filo lentamente fino a montare l'emulsione."
+     "Nome della ricetta completa". Ingredienti: "ingredienti estratti dal kg". Procedimento: "claim estratti dal kg "
 
     ESEMPIO DI QUERY ERRATA DA SCARTARE:
     "Ricetta della maionese con ingredienti e procedimento."
