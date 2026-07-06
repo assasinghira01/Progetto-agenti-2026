@@ -58,7 +58,7 @@ class CucinaKnowledgeGraph:
         tono: str = "amichevole e appassionato",
         registro: str = "informale ma preciso, ricco di aneddoti culturali",
         lunghezza_target: int = 600,
-        audience: str = "appassionati di cucina tradizionale, livello intermedio",
+        audience: str = "appassionati di cucina tradizionale italiana, livello intermedio",
         note_stilistiche: str = (
             "Usa sempre la seconda persona singolare per coinvolgere il lettore. "
             "Includi almeno un rimando culturale o storico per ogni ricetta. "
@@ -183,11 +183,23 @@ class CucinaKnowledgeGraph:
     def get_ultimi_post_pubblicati(self, limite: int = 5):
         """
         Recupera gli ultimi N post pubblicati dal blog, ordinati dal più recente.
-        Restituisce una lista di dizionari con titolo, data e ricetta trattata.
+        Per ogni post recupera anche i claim associati (se presenti).
+        Usa OPTIONAL MATCH per i claim
+
+        Restituisce una lista di dizionari con:
+          - titolo: titolo del post
+          - data: data di pubblicazione
+          - topic_trattato: nome della ricetta
+          - claims: lista di stringhe con i claim chiave (può essere vuota)
         """
         query_cypher = """
         MATCH (p:Post)-[:PARLA_DI]->(r:Ricetta)
-        RETURN p.titolo AS titolo, p.data AS data, r.name AS topic_trattato
+        MATCH (p)-[:HA_CLAIM]->(c:Claim)
+        WITH p, r, collect(c.testo) AS claims
+        RETURN p.titolo   AS titolo,
+               p.data     AS data,
+               r.name     AS topic_trattato,
+               claims
         ORDER BY p.data DESC
         LIMIT $limite
         """
@@ -202,10 +214,15 @@ class CucinaKnowledgeGraph:
                         "titolo": record["titolo"],
                         "data": record["data"],
                         "topic_trattato": record["topic_trattato"],
+                        "claims": record["claims"] or [],
                     }
                 )
-            print(f"[NEO4J] Recuperati {ultimi_post} ultimi post pubblicati.")
-            return ultimi_post
+
+        print(
+            f"[NEO4J] Recuperati {len(ultimi_post)} post "
+            f"(con {sum(len(p['claims']) for p in ultimi_post)} claim totali)."
+        )
+        return ultimi_post
 
     def controlla_cronologia_post(self, topic: str):
         """
@@ -261,7 +278,7 @@ class CucinaKnowledgeGraph:
         query_cypher = """
         CALL db.index.vector.queryNodes('recipe_embedding_index', 1, $vettore)
         YIELD node AS r, score
-        WHERE score > 0.85
+        WHERE score > 0.95
         MATCH (r)-[:CONTIENE]->(i:Ingrediente)
         RETURN i.name AS ingrediente
         """
@@ -274,6 +291,46 @@ class CucinaKnowledgeGraph:
                     termini_espansi.append(record["ingrediente"])
 
         return termini_espansi
+
+    def get_ricetta_completa_da_grafo(self, topic: str) -> dict | None:
+        """
+        Recupera ingredienti CON DOSI di una sottoricetta già salvata.
+        Se trovata, permette di ricostruire la ricetta senza andare sul web,
+        garantendo coerenza con quanto già pubblicato dal blog.
+        """
+        vettore = self.embeddings.embed_query(topic.strip())
+
+        query = """
+        CALL db.index.vector.queryNodes('recipe_embedding_index', 1, $vettore)
+        YIELD node AS r, score
+        WHERE score > 0.90
+        MATCH (r)-[rel:CONTIENE]->(i:Ingrediente)
+        RETURN r.name AS ricetta,
+            score,
+            collect({
+                nome: i.name,
+                quantita: rel.quantita,
+                fase: rel.fase
+            }) AS ingredienti
+        LIMIT 1
+        """
+
+        with self.driver.session() as session:
+            risultato = session.run(query, vettore=vettore)
+            record = risultato.single()
+
+            if record and record["ingredienti"]:
+                print(
+                    f"[NEO4J] Ricetta '{record['ricetta']}' trovata nel grafo "
+                    f"(score: {record['score']:.2f}) — uso dosi storiche del blog."
+                )
+                return {
+                    "ricetta": record["ricetta"],
+                    "ingredienti": record["ingredienti"],
+                    "score": record["score"],
+                }
+
+        return None
 
     def salva_post(
         self,
@@ -288,8 +345,8 @@ class CucinaKnowledgeGraph:
         ingredienti_diretti = ingredienti_diretti or []
         sotto_ricette = sotto_ricette or []
 
-        op_madre = topic_originale.strip().capitalize()
-        op_finale = topic_finale.strip().capitalize()
+        op_madre = topic_originale.strip().lower()
+        op_finale = topic_finale.strip().lower()
         data_oggi = datetime.now().strftime("%Y-%m-%d")
         titolo_post = f"Post su {op_finale} - {data_oggi}"
 
@@ -531,7 +588,7 @@ class CucinaKnowledgeGraph:
         nei post successivi per creare coerenza editoriale.
         """
         prompt = f"""
-        Leggi il seguente post di un blog di cucina sul tema '{topic}'.
+        Leggi il seguente post di un blog di cucina italiana sul tema '{topic}'.
         Estrai esattamente 3-5 CLAIM CHIAVE: affermazioni fattuali o culturali, il procedimento tecnico riassunto della sottoricetta
         brevi (max 25 parole ciascuna) che potrebbero essere richiamate o referenziate
         in futuri post per creare coerenza editoriale.

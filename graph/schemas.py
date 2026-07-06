@@ -13,7 +13,9 @@ class TopicPianificato(BaseModel):
 
     giustificazione: Optional[str] = Field(
         default="",
-        description="Se è una variante o fa parte di un piano editoriale, spiega il motivo della scelta. Se è un topic singolo imposto dall'utente, lascia vuoto.",
+        description="Se il topic parte di un piano editoriale, spiega il motivo della scelta, l'ordine e la coerenza con i topic precedentemente generati e il moodo in cui il topic diversifica il blog. "
+        "Se il topic e una variante di un piatto già pubblicato, giustifica il motivo della scelta ecome si differenzia al piatto originale. "
+        "Se è un topic singolo imposto dall'utente, lascia vuoto.",
     )
 
 

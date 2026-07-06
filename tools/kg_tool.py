@@ -18,7 +18,7 @@ kg_client = CucinaKnowledgeGraph(
 def get_ultimi_post():
     """
     Torna gli ultimi post pubblicati sul blog per evitare ripetizioni.
-    Restituisce l'elenco dei titoli dei post recenti.
+     Restituisce titolo, topic trattato e i claim chiave di ciascun post recente..
     """
     # Recuperiamo la lista dei post (restituisce una lista di dict)
     risultati = kg_client.get_ultimi_post_pubblicati(limite=30)
@@ -26,11 +26,19 @@ def get_ultimi_post():
     if not risultati:
         return "Nessun post precedente è stato pubblicato nel blog. Il blog è vuoto."
 
-    # Estraiamo i titoli e formattiamoli in una stringa pulita
-    elenco_titoli = [post["titolo"] for post in risultati]
-    stringa_post = ", ".join(elenco_titoli)
+    # Estraiamo i dati
+    righe = []
+    for post in risultati:
+        riga = f"- {post['titolo']} (topic: {post['topic_trattato']})"
+        claims = post.get("claims", [])
+        if claims:
+            # Max 2 claim per post: bastano al planner per capire il contenuto
+            # già trattato senza gonfiare inutilmente il contesto
+            claim_str = "; ".join(claims)
+            riga += f"\n  Claim chiave: {claim_str}"
+        righe.append(riga)
 
-    return f"Ultimi post trovati nel blog: {stringa_post}"
+    return "Ultimi post pubblicati nel blog:\n" + "\n".join(righe)
 
 
 @tool
@@ -107,3 +115,38 @@ def get_claim_per_retrieval(nome_elemento: str) -> str:
     except Exception as e:
         print(f"[TOOL] ERRORE: {e}")
         return f"ERRORE: {e}"
+
+
+@tool
+def get_ricetta_dal_grafo(nome_elemento: str) -> str:
+    """
+    Verifica se una ricetta o sottoricetta è già stata pubblicata dal blog
+    e ne recupera gli ingredienti con le dosi esatte già usate.
+
+    USA QUESTO TOOL come PRIMO CHECK prima di cercare nel DB locale
+    o sul web. Se il blog ha già pubblicato questa preparazione,
+    le dosi qui presenti sono quelle ufficiali del blog — usale
+    direttamente senza cercare altre fonti per garantire coerenza.
+
+    Args:
+        nome_elemento: Il nome della ricetta o sottoricetta da cercare.
+    """
+    risultato = kg_client.get_ricetta_completa_da_grafo(nome_elemento)
+
+    if not risultato:
+        return f"ASSENTE_DAL_GRAFO: '{nome_elemento}' non è ancora nel blog. Procedi con DB locale o web."
+
+    ingredienti_str = "\n".join(
+        [
+            f"  - {ing['nome']}: {ing['quantita']}"
+            for ing in risultato["ingredienti"]
+            if ing.get("nome") and ing.get("quantita")
+        ]
+    )
+
+    return (
+        f"TROVATA_NEL_GRAFO: '{risultato['ricetta']}' è già stata pubblicata dal blog.\n"
+        f"USA QUESTI INGREDIENTI — sono quelli ufficiali del blog:\n"
+        f"{ingredienti_str}\n"
+        f"NON cercare questa preparazione altrove: i dati sopra sono già validati."
+    )

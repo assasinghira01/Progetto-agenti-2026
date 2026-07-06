@@ -101,7 +101,7 @@ def think_tool(
 
         #### REGOLA FONDAMENTALE DELLA MULTI-RICETTA
         Se la ricerca produce più documenti validi per lo stesso topic (es. più versioni dal web), ognuno è una **Ricetta Madre indipendente** il tuo compito
-        non è scegliere la migliore MA REPERIRE DATI PER OGNUNA DI ESSA.
+        NON è scegliere la migliore MA REPERIRE DATI PER OGNUNA DI ESSA.
         - Completa l'intero albero (sottoricette e loro dipendenze) per la PRIMA Ricetta Madre.
         - Poi passa alla SECONDA, e così via.
         - Non fermarti finché non hai processato TUTTE le Ricette Madri trovate.

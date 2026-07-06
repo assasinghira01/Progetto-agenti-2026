@@ -44,8 +44,8 @@ def cerca_ricetta_nel_db(query: str) -> str:
 
     CASO A - K-RAG PURO (Se hai estratto dati dal Knowledge Graph in precedenza):
     Se possiedi già una lista di ingredienti o claim recuperati dal grafo, la tua query DEVE
-    contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici e claim recuperati.
-    Il procedimento tecnico deve riguardare  SOLO i claim recuperati.
+    contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici e tutti i claim recuperati.
+    Il procedimento tecnico deve contenere TUTTI i claim recuperati(senza modifiche).
 
     CASO B - HyDE FALLBACK (Se il Knowledge Graph era vuoto o non hai dati pregressi):
     Se il piatto è inedito, devi allucinare tu l'intero documento. La tua query DEVE contenere:
@@ -54,7 +54,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
     3. Un mini-procedimento tecnico discorsivo.
 
     ESEMPIO DI QUERY CORRETTA E RIGOROSA CHE DEVI EMULARE:
-     "Nome della ricetta completa". Ingredienti: "ingredienti estratti dal kg". Procedimento: "claim estratti dal kg "
+     "Nome della ricetta completa". Ingredienti: "ingredienti estratti dal kg". Procedimento: "claim estratti dal kg combinati"
 
     ESEMPIO DI QUERY ERRATA DA SCARTARE:
     "Ricetta della maionese con ingredienti e procedimento."
@@ -63,7 +63,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
         return "Errore di sistema: Il database locale non è inizializzato."
 
     try:
-        SOGLIA_DISTANZA = 0.25
+        SOGLIA_DISTANZA = 0.20
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         documenti_recuperati = []

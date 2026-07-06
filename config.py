@@ -5,6 +5,7 @@ from tools.search_tool import esegui_ricerca_web
 from tools.rag_tool import cerca_ricetta_nel_db
 from tools.kg_tool import (
     controlla_storico_post,
+    get_ricetta_dal_grafo,
     get_ultimi_post,
     get_ingredienti,
     get_claim_pertinenti,
@@ -28,6 +29,7 @@ lista_tools = [
     think_tool,
     get_claim_pertinenti,
     get_claim_per_retrieval,
+    get_ricetta_dal_grafo,
 ]
 
 

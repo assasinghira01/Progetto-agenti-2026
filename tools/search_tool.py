@@ -96,13 +96,14 @@ def ottimizza_query_ricerca(query_originale: str) -> str:
        - Se invece è un piatto autonomo (es. "ganache al cioccolato", "lasagne al pesto", "pizza capricciosa"), mantieni il nome completo senza rimuovere parti.
 
     2. **RILEVAZIONE E ESPANSIONE DELLA VARIANTE (FONDAMENTALE)**
-       - Se la query originale contiene una VARIANTE ESPLICITA (es. "light", "senza uova", "vegana", "senza glutine", "senza lattosio", "al forno", "fritta", "allo zafferano"), devi **rafforzarla** aggiungendo **almeno due sinonimi o espressioni equivalenti** subito dopo il nome della ricetta, separati da spazi.
+       - Se la query originale contiene una VARIANTE ESPLICITA (es. "light", "senza uova", "vegana", "senza glutine", "senza lattosio", "al forno", "fritta", "allo zafferano"), devi **rafforzarla** aggiungendo le seguenti parole chiave per rendere la query più specifica e rilevante:
        - Esempi di espansione:
-         - "carbonara light" → "carbonara light ipocalorica light ricetta leggera"
-         - "besciamella light" → "besciamella light senza burro leggera light"
-         - "tiramisù senza glutine" → "tiramisù senza glutine per celiaci senza glutine"
-        SE la query contiene la parola "vegana" o "vegano", NON aggiungere "senza uova" o "senza latticini": la parola "vegana" è già sufficiente.
-            Esempio: "carbonara vegana" → "carbonara vegana ricetta" (senza ulteriori espansioni).
+         - "carbonara light" → "carbonara ipocalorica ricetta leggera"
+         - "besciamella light" → "besciamella ipocolariica leggera light"
+         - "tiramisù senza glutine" → "tiramisù senza glutine per celiaci"
+         - "tiramisu alle fragole->" → "tiramisu alle fragole"
+         - "maionese vegana" → "maionese vegana senza uova"
+         - "caronara vegana" → "caronara vegana senza uova e guanciale"
        - Se la variante NON è presente, NON aggiungere nulla.
 
     3. **AGGIUNTA FINALE**

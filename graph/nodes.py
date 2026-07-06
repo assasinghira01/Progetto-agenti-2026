@@ -39,6 +39,7 @@ def planner_node(state: Blog_Cucina):
         testo_prompt = f"""
         # Ruolo
     Sei un planner editoriale per un blog di cucina dove vengono pubblicati dei post sulla preparazione di piatti. 
+    [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post`, `get_ultimi_post` e `get_ingredienti` (per il Knowledge Graph).
     
     # REGOLE DI RAGIONAMENTO (OBBLIGATORIE):
     Il tuo flusso di lavoro deve essere rigorosamente questo:
@@ -53,12 +54,15 @@ def planner_node(state: Blog_Cucina):
 
     FASE 1 - RECUPERO STORICO: 
     Chiama il tool `get_ultimi_post` per capire cosa è stato pubblicato di recente. (Non richiamarlo più di una volta). Usa il `think_tool` per riflettere sui risultati.
-    FASE 1.5 – RECUPERO CLAIM ESISTENTI (OBBLIGATORIO):
-    Dopo aver visto i post recenti, chiama `get_claim_pertinenti` con un topic generico del dominio (es. "cucina italiana" o "cucina siciliana").
-    Usa i claim restituiti per:
-    - Trovare argomenti già trattati da approfondire (es. se c'è un claim sulla besciamella, proponi un piatto che la utilizza).
-    - Identificare lacune tematiche (es. se ci sono molti claim su primi piatti, proponi un secondo o un dolce).
-    Nel `think_tool`, commenta esplicitamente come i claim hanno influenzato la scelta dei topic.
+    Usa i claim restituiti associati per:
+    - Identificare lacune tematiche e vuoti all'interno del blog 
+       - es. se ci sono post e claim su primi piatti, proponi un antipasto, un secondo, un contorno o un dolce cosi diversifichiamo la tipologia di ricette trattate.
+       - es. se ci sono post e claim su piatti a base di carne, proponi un piatto a base di pesce o vegano cosi diversifichiamo la tipologia di proteine trattate.
+       - es. se ci sono post e claim su piatti fritti, proponi un piatto al forno o al vapore cosi diversifichiamo la tipologia di cottura trattate.
+       - es. se ci sono post e claim su piatti caldi, proponi un piatto freddo o a temperatura ambiente cosi diversifichiamo la tipologia di temperatura trattate.
+    - diversificare le tecniche di cottura, gli ingredienti principali e le tipologie di piatti per evitare ripetizioni.
+    - Giustifica anche l'ordine in cui generi i topic, se il primo è un antipasto, il secondo un primo e il terzo un dolce, spiega perché hai scelto quest'ordine.
+     Usa il `think_tool` per riflettere sui risultati. Nel `think_tool`, commenta esplicitamente come i claim hanno influenzato la scelta dei topic.
     
     FASE 2 - IDEAZIONE INTERNA E VERIFICA (IL CUORE DEL TUO LAVORO):
     NON generare ancora il piano finale. Nella tua mente, elabora  SOLO 3 nuovi topic (variando le categorie in base alle tipolgie, se sono state pubblicati due primi e una secondo puoi generare un antipasto o un dessert, se una 
@@ -75,17 +79,21 @@ def planner_node(state: Blog_Cucina):
             - È ASSOLUTAMENTE VIETATO ❌ combinare una pietanza principale con un contorno o creare piatti composti. Devi indicare solo l'elemento principale.
             - È VIETATO USARE nomi generici come "dolce", "antipasto", "primo", "contorno", ecc.
             **Devi usare un nome specifico che identifichi un piatto preciso, ad esempio:**
+            - ❌ SBAGLIATO (VIETATO): "sgombro al forno con patate" → usa "Filetto di sgombro al forno" 
             - ❌ SBAGLIATO (VIETATO): "dolce al caffè" → usa "Tiramisù" o "Panna cotta al caffè"
             - ❌ SBAGLIATO (VIETATO): "antipasto" → usa "Bruschette al pomodoro" o "Caprese"
             - ❌ SBAGLIATO (VIETATO): "primo a base di pesce" → usa "Spaghetti alle vongole"
-            - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate"
-            - ❌ SBAGLIATO (VIETATO): "Filetto di manzo con patate al forno"
+            - ❌ SBAGLIATO (VIETATO): "Pollo al limone con contorno di verdure grigliate" usa "pollo al limone"
+            - ❌ SBAGLIATO (VIETATO): "Filetto di manzo alla griglia con patate al forno" → usa "Filetto di manzo alla griglia" 
+            
             - ✅ CORRETTO: "Pollo al limone"
             - ✅ CORRETTO: "Verdure grigliate"
             - ✅ CORRETTO: "Filetto di manzo al pepe verde"
+            - ✅ CORRETTO: "patate al forno"
+            
             - NON cercare dati online o in locale. Il tuo compito è solo pianificare.
     
-    [VINCOLO TASSATIVO]: È VIETATO usare `esegui_ricerca_web` o tool RAG. Puoi usare SOLO `controlla_storico_post` e `get_ingredienti` (per il Knowledge Graph).
+   
     
     """
 
@@ -204,8 +212,7 @@ def planner_node(state: Blog_Cucina):
             -Se il database risponde "BLOCCATO",  direttiva dell'utente è già stata pubblicata. NON generare idee a caso. Esegui questa sequenza esatta SOLO SE il database risponde "BLOCCATO":
        - AZIONE 1: Chiama immediatamente il tool `get_ingredienti` passando il nome del piatto bloccato.
        - AZIONE 2: Attendi i risultati da Neo4j (gli ingredienti).
-       - AZIONE 2.5 (FACOLTATIVA MA CONSIGLIATA): Se vuoi trovare una variante più coerente con la storia del blog, chiama `get_claim_pertinenti` con il nome del piatto bloccato. Usa i claim restituiti per orientarti verso una ricetta simile o un approfondimento tematico (es. se c’è un claim sulla besciamella, potresti proporre un piatto che la utilizza).
-       - AZIONE 3: Chiama il tuo `think_tool` per ragionare sugli ingredienti estratti **e sugli eventuali claim** e scegli UNA proposta tra le due opzioni seguenti.
+       - AZIONE 3: Chiama il tuo `think_tool` per ragionare sugli ingredienti estratti e scegli UNA proposta tra le due opzioni seguenti.
                     Scegli l'opzione in base alla NATURA del piatto bloccato:
                     ▶ OPZIONE A – VARIANTE GUSTO / COTTURA (scegli questa se il piatto bloccato è una base neutra facilmente declinabile, es. pizza, risotto, pasta al sugo, torta):
                         - Cambia il GUSTO o il CONDIMENTO principale, NON la proteina base.
@@ -656,9 +663,21 @@ def krag_research_node(state: Blog_Cucina):
     È VIETATO saltare dal punto 1 al punto 3 senza aver eseguito il punto 2.
 
     ---
+    
+    PAROLE CHIAVI PER LA RICERCA:
+    Se la ricetta contiene uno di questi termini la ricetta deve soddisfare la condizione corrispondente:
+    -light: cerca versioni a basso contenuto calorico della ricetta.
+    -vegetariana: cerca versioni senza carne o pesce.
+    -vegana: cerca versioni senza ingredienti di origine animale.
+    -senza glutine: cerca versioni senza glutine.
+    -senza lattosio: cerca versioni senza lattosio.
+    -senza zucchero: cerca versioni senza zuccheri aggiunti.
+    -senza uova: cerca versioni senza uova.
+    
 
     ## IL TUO RUOLO
-    Sei un Agente Investigatore culinario. Il tuo compito è raccogliere i dati completi per la ricetta indicata dal topic: **'{topic}'**, e per tutte le sue eventuali sottoricette che superano il test di seguito.
+    Sei un Agente ricercatore culinario. Il tuo compito è raccogliere i dati completi per la ricetta indicata dal topic: **'{topic}'**, e per tutte le sue eventuali sottoricette che superano il test di seguito.
+    non ti interessa scegliere la ricetta migliore, ma SOLO raccogliere TUTTE le informazioni disponibili.
 
     ---
     ## TEST DELLA SOTTORICETTA (OBBLIGATORIO)
@@ -668,8 +687,8 @@ def krag_research_node(state: Blog_Cucina):
     Esempi: besciamella, ragù, maionese, crema pasticcera, pasta biscotto, brodo di carne, pesto di basilico, crema al mascarpone .
 
     Due criteri operativi guidano la tua analisi:
-    - **CRITERIO ESPLICITO**: se il testo di un ingrediente contiene rimandi come “(vedi preparazione base)” o similari, quello è un chiaro indicatore di una sottoricetta.
-    - **CRITERIO DEDUTTIVO**: se la ricetta descrive, nei passaggi del suo procedimento, la preparazione di un ingrediente complesso (es. besciamella, ragù, crema pasticcera, pasta biscotto, pastella), se citato quel ingrediente va considerato come una sottoricetta.
+    - **CRITERIO ESPLICITO**: se il testo di un ingrediente di una ricetta del DB contiene rimandi come “(vedi preparazione base)” o similari, quello è un chiaro indicatore di una sottoricetta.
+    - **CRITERIO DEDUTTIVO**: se la ricetta cita nei suoi ingredienti e nei passaggi del suo procedimento, la preparazione di un ingrediente complesso (es. besciamella, ragù, crema pasticcera, pasta biscotto, pastella,brodo di carne, maionese, ecc...). Quel ingrediente va considerato come una sottoricetta.
 
     ❌ **FALLITO** – l'ingrediente è già pronto o subisce solo miscelazione a crudo, senza trasformazione significativa. In particolare:
         - **Condimenti e mix crudi**: marinature, panature, miscele di spezie, triti semplici, salse crude.
@@ -679,25 +698,6 @@ def krag_research_node(state: Blog_Cucina):
         - **Bagne e sciroppi dolci**: bagna di fragole, bagna al caffè, sciroppo di zucchero, succo di frutta preparato al momento.
 
     ⚠️ Se il test FALLISCE, consideralo un normale ingrediente. NON cercarlo come SOTTORICETTA.
-
-    ---
-    ## TEST DI ATTINENZA ALLA VARIANTE (SOLO PER IL TOPIC PRINCIPALE)
-    Il topic **'{topic}'** può contenere una variante esplicita (es. “light”, “vegana”, “senza uova”, “al forno”).  
-    Prima di accettare un documento (DB o Web) per la ricetta principale, chiediti:
-
-    *“Questo documento rispetta la variante specifica richiesta, o è la versione classica/base?”*
-
-    - Se il topic è “besciamella light” e il documento è la besciamella classica senza alcuna riduzione calorica o sostituzione → **TEST FALLITO**. Scartalo.
-    - Se il topic è “Tiramisù senza uova crude” e il documento usa uova crude classiche → **TEST FALLITO**.
-    - Se il topic NON specifica nessuna variante, la ricetta classica SUPERA SEMPRE il test.
-
-    Nel `think_tool`, quando valuti un documento per il topic principale, DICHIARA ESPLICITAMENTE l'esito:
-    "Test di attinenza: SUPERATO" oppure "Test di attinenza: FALLITO — [motivo specifico]".
-    🚨 REGOLA FERREA PER VARIANTI ESPLICITE:
-        Se il topic '{topic}' contiene una parola chiave che indica una variante (es. "alla fragola", "light", "vegana", "senza uova", "al forno", "allo zafferano", "ai frutti di mare", "al pistacchio", "al cioccolato"), il documento DEVE menzionare ESPLICITAMENTE quella parola nel titolo, negli ingredienti o nel procedimento.
-        Se la parola chiave NON compare → TEST FALLITO AUTOMATICO.
-        Non cercare di dedurre se la ricetta può essere adattata: attieniti solo a ciò che è scritto.
-        Esempio pratico: per "Tiramisù alla fragola", la parola "fragola" DEVE apparire. Se non appare, il test fallisce e DEVI procedere OBBLIGATORIAMENTE al punto 4 (ricerca web).
 
     ---
 
@@ -723,22 +723,14 @@ def krag_research_node(state: Blog_Cucina):
     2. **Cerca nel DB**:
     - Usa `cerca_ricetta_nel_db` con la query espansa.
     3. **Valuta il risultato**:
-    - ✅ Se TROVATA una ricetta **completa** (ingredienti + procedimento) **E** supera il **TEST DI ATTINENZA ALLA VARIANTE** → memorizza e passa direttamente alla **FASE 2** (è VIETATO cercare sul Web).
-    - ❌ Se NON TROVATA, incompleta, o **fallisce il test di attinenza** → chiama `think_tool` per analizzare il fallimento, poi vai al punto 4.
+    - ✅ Se TROVATA una ricetta **completa** (ingredienti + procedimento) → memorizza e passa direttamente alla **FASE 2** (è VIETATO cercare sul Web).
+    - ❌ Se NON TROVATA o incompleta → chiama `think_tool` per analizzare il fallimento, poi vai al punto 4.
     ⚠️ REGOLA DI STOP RICERCHE: Una volta che hai trovato una o più ricette madri valide (da DB o Web) per il topic '{topic}', NON cercare ulteriori versioni. Passa immediatamente alla FASE 2 senza ulteriori chiamate a `esegui_ricerca_web` o `cerca_ricetta_nel_db` per la ricetta principale.
     4. **Ricerca Web (solo in caso di fallimento DB)**:
     - Usa `esegui_ricerca_web` per `{topic}` usando la query espansa.
-    - Valuta i documenti ottenuti con il **TEST DI ATTINENZA ALLA VARIANTE**.
-    - ✅ Se trovi un documento che SUPERA il test → memorizzalo come fonte primaria e passa alla **FASE 2**.
-        - ❌ Se TUTTI i documenti restituiti FALLISCONO il test (es. nessuno contiene la variante richiesta o sono tutti fuori tema):
-            - 🚨 REGOLA ASSOLUTA: NON puoi mai arrenderti dopo il primo tentativo. DEVI sempre effettuare un secondo tentativo con una query diversa.
-            - Chiama `think_tool` e dichiara: "Primo tentativo Web fallito per Test di Attinenza. DEVO obbligatoriamente riformulare la query e provare un secondo tentativo."
-            - Riformula mentalmente la query (NON chiamare di nuovo `get_ingredienti`). Usa sinonimi, traduzioni, o varianti della richiesta. Per ricette vegane, prova query come "carbonara vegana ricetta" o "pasta alla carbonara vegana".
-            - Esegui OBBLIGATORIAMENTE il **secondo e ultimo tentativo** con `esegui_ricerca_web` usando la NUOVA query.
-            - Valuta nuovamente i documenti con il Test di Attinenza.
-            - ✅ Se trovi un documento che SUPERA il test → memorizzalo e passa alla **FASE 2**.
-            - ❌ SOLO se ANCHE il secondo tentativo fallisce → puoi dichiarare "FALLIMENTO: Ricetta non disponibile" e terminare con STATO: FINITO.
-
+    - Valuta i documenti ottenuti: cerca una ricetta completa (ingredienti + procedimento).
+    - ✅ Se trovi uno o piu documenti completi e coerenti per `{topic}` memorizzali come fonte primaria e passa alla **FASE 2**.
+    - ❌ Se nessun documento è completo, coerente per `{topic}` o la ricerca non restituisce risultati → dichiara "FALLIMENTO: Ricetta non disponibile" e termina con STATO: FINITO.
     ---
 
     ### ▶ FASE 2 – ANALISI DELLE SOTTORICETTE (ESEGUI PER OGNI RICETTA MADRE)
@@ -751,10 +743,7 @@ def krag_research_node(state: Blog_Cucina):
     3. Esito dell’analisi:
     - **NESSUNA SOTTORICETTA**: dichiaralo esplicitamente nel think_tool: "Nessuna sottoricetta per [Nome Ricetta Madre]. Passo alla prossima Ricetta Madre (se esiste) o ai claim."
     - **SOTTORICETTE TROVATE**: astrai il loro VERO NOME e, per OGNUNA di esse, esegui SUBITO la FASE 3 (ricerca). Solo dopo aver completato TUTTE le sottoricette di questa Ricetta Madre, puoi passare alla Ricetta Madre successiva.
-    4. Dopo aver processato TUTTE le Ricette Madri e le loro sottoricette, chiama `get_claim_pertinenti` per '{topic}' per verificare la coerenza con i claim esistenti.
-    - Se un claim contraddice la ricetta o le sottoricette, segnalalo nel `think_tool` e considera la fonte meno affidabile.
-    - Nel `think_tool` DEVI SEMPRE indicare quanti claim hai trovato e se sono coerenti o in conflitto con la ricetta.
-    - Se non ci sono claim pertinenti, dichiara: "Nessun claim pertinente trovato. La ricetta è comunque valida."
+  
 
     ### ▶ FASE 3 – RICERCA DI UNA SOTTORICETTA (loop per ognuna)
     ⚠️ REGOLA ANTI-RITORNO: Dopo aver completato la ricerca di una sottoricetta (CHECK 1, 2), torna alla FASE 2 per verificare se ci sono altre sottoricette per la STESSA Ricetta Madre. NON passare a una nuova Ricetta Madre e NON cercare di nuovo la ricetta principale finché non hai completato tutte le sottoricette di quella corrente.
@@ -763,6 +752,7 @@ def krag_research_node(state: Blog_Cucina):
     2. Cerca con `cerca_ricetta_nel_db` usando la query espansa.
     3. ✅ **Trovata completa** → memorizza, sottoricetta RISOLTA. Passa alla prossima.
     ❌ **Non trovata o incompleta** → vai al CHECK 2.
+    
 
     **CHECK 2 – RICERCA WEB (ultima spiaggia)**
     1. Usa `esegui_ricerca_web` per la sottoricetta.
@@ -772,15 +762,16 @@ def krag_research_node(state: Blog_Cucina):
     ---
 
     ### ▶ TERMINAZIONE
+    - Se non trovi nessuna sottoricetta.
     - Quando tutte le sottoricette di una Ricetta Madre sono risolte o abbandonate, la Ricetta Madre è completa.
-    - Se ci sono più Ricette Madri (es. topic multi-ricetta), processale una alla volta.
+    - Se ci sono più Ricette Madri (più ricette sullo stesso topic), processale una alla volta.
     - Solo quando **tutto** è stato completato, invoca `think_tool` con “STATO: FINITO”.
 
     ---
 
     ## STATO ATTUALE
-    Inizia invocando `think_tool` per dichiarare l’avvio della FASE 1 per il topic: **'{topic}'**.
-        """
+    Inizia invocando `think_tool` per dichiarare l'avvio della FASE 1 per il topic: **'{topic}'**.
+    """
 
     riflessioni_research = [r for r in reasoning_trace if r.startswith("[RESEARCH]")]
 
@@ -868,8 +859,8 @@ def validator_node(state: Blog_Cucina):
     # ── PASSO 1: messaggi vuoti → l'agente chiama get_claim_pertinenti ──
     if not messaggi:
         prompt_riflessione = f"""
-        Sei un Validatore Supremo. Prima di tutto, chiama `get_claim_pertinenti` per '{topic}'.
-        NON chiamare altri tool adesso.
+        Sei un Validatore Supremo. Prima di tutto, chiama `get_claim_pertinenti` per '{topic}',
+        NON CHIAMARE ALTRI TOOL PRIMA DI AVER ESEGUITO QUESTO PASSO.
         """
         messaggio = [
             SystemMessage(content=prompt_riflessione),
@@ -901,19 +892,27 @@ def validator_node(state: Blog_Cucina):
         {claim_text}
 
         Ora analizza i claim e confrontali con i documenti, quindi usa il `think_tool` per esprimere la tua valutazione COMPLETA.
+        
 
         Compila i 3 campi del `think_tool` SEGUENDO TASSATIVAMENTE QUESTE ISTRUZIONI:
 
         ▶ NEL CAMPO 'analisi_contesto' (ESEGUI FASE 1 e FASE 2 INSIEME ADESSO):
-            - Confronta TUTTI i documenti che trattano '{topic}'.
+        
+           - Confronta TUTTI i documenti che trattano '{topic}'.
            - Eleggi il MIGLIORE come "Ricetta Madre" (assegnali SCORE 1) in base al punteggio o all'autorevolezza.
            - Assegna SCORE 0 a tutti gli altri documenti che parlano di '{topic}' (sono duplicati inferiori).
            - Analizzando i tuoi ragionamenti precedenti {riflessioni_research} individua le sottoricette che sono strettamente necessarie per realizzarla (non citare gli ingredienti).
+           -verificare la coerenza con i claim esistenti  {claim_text}.
+            -Se un claim contraddice la ricetta o le sottoricette, segnalalo nel `think_tool`.
+            - Nel `think_tool` DEVI SEMPRE indicare quanti claim hai trovato e se sono coerenti o in conflitto con la ricetta.
+            - Se ci claim contraddittori, dichiara: "contraddizione trovata. La ricetta non è valida!" e assegna SCORE 0 ai documenti contradittori.
+            - se non ci sono claim contraddittori, dichiara: "nessuna contraddizione trovata. La ricetta è valida!".
 
         ▶ NEL CAMPO 'valutazione_opzioni' (ESEGUI FASE 3 ADESSO):
         - Prendi i documenti RIMASTI (quelli non ancora eletti o scartati).  - 
            - SE il documento è una sottoricetta della ricetta madre: ASSEGNA Score 1 al migliore e scarta gli altri assegandoli Score 0(sono duplicati inferiori).
            - SE il documento è irrilevante,fuori tema o non serve: assegna SCORE 0.
+           
 
         ▶ NEL CAMPO 'decisione_finale' (VERDETTO FINALE):
         - Scrivi la LISTA FISICA ED ESATTA delle tue valutazioni.
@@ -1215,10 +1214,11 @@ def writer_node(state):
 
         2. RIGORE STRUTTURALE (coesione ricetta → sottoricette):
         - Il tuo output deve rispecchiare fedelmente l'albero delle dipendenze
-            stabilito nelle tracce di ragionamento.
+            stabilito nelle tracce di ragionamento :{traces_formattate}.
         - Se il ragionamento indica che un ingrediente (es. Besciamella, Ragù)
             è una SOTTORICETTA autonoma, mappala interamente in 'sotto_ricette'
             estraendo i suoi ingredienti dal testo della fonte
+        - è VIETATO creare delle sottoricette che non compaiono nel ragionamento!
         - ELIMINA TUTTI gli ingredienti della sottoricetta dagli ingredienti diretti della ricetta madre.
         - È VIETATO lasciare una sottoricetta complessa come stringa piatta
             negli ingredienti diretti della ricetta madre.
@@ -1383,6 +1383,9 @@ def kg_update_node(state: Blog_Cucina):
 
 **REGOLE RIGIDE (in ordine di priorità):**
 
+⚠️REGOLA ANTI-RICORSIONE: La ricetta principale (il topic '{topic_finale}') NON può mai essere considerata una sottoricetta di se stessa. 
+ Quando analizzi gli ingredienti, escludi a priori il nome della ricetta che stai preparando.
+
 1. **Modifiche dietetiche o di cottura**  
    Se il nome contiene una parola che indica una MODIFICA DIETETICA o DI COTTURA riconoscibile (es. "light", "vegana", "senza glutine", "senza uova", "senza lattosio", "integrale", "al forno", "fritta"), elimina quella parola.  
    *Esempi:*  
@@ -1409,7 +1412,6 @@ def kg_update_node(state: Blog_Cucina):
    Dopo aver applicato una rimozione (regola 1 o 2), controlla se il nome risultante è un piatto noto e autonomo. Se non lo è, **mantieni il nome originale** (non forzare l'estrazione).  
    *Esempio:* "Pasta al pesto" non diventa "Pasta" perché "Pasta" da sola non è un piatto specifico; la radice rimane "Pasta al pesto".  
 
-5. **In caso di dubbio, applica la regola 1 o 2 solo se la parola chiave è chiaramente una modifica o un gusto noto, altrimenti lascia il nome invariato.**
 
 Ora analizza: **'{topic_finale}'**
 
