@@ -136,10 +136,11 @@ def think_tool(
 
         1. Hai acquisito con successo TUTTE le Ricette Madri individuate per il topic.
         - *Nota*: Se dopo aver esplorato DB e web non trovi altre versioni, considera la lista chiusa.
-        2. Per OGNI Ricetta Madre hai esaminato il testo ed estratto l'albero delle dipendenze (sottoricette).
-        3. Ogni singola sottoricetta di OGNI Ricetta Madre è stata dichiarata "RISOLTA" (tramite DB, Cortocircuito o Web).
-        4. L'intero albero delle dipendenze di TUTTE le Ricette Madri è chiuso, senza rami pendenti.
-        5. Non hai più NESSUN tool da invocare: non ci sono altre ricette madri da iniziare né sottoricette da risolvere.
+        2. Hai esaminato TUTTE le Ricette Madri e non hai trovato nessuna sottoricetta.
+        3. Per OGNI Ricetta Madre hai esaminato il testo ed estratto l'albero delle dipendenze (sottoricette).
+        4. Ogni singola sottoricetta di OGNI Ricetta Madre è stata dichiarata "RISOLTA" (tramite DB, Cortocircuito o Web).
+        5. L'intero albero delle dipendenze di TUTTE le Ricette Madri è chiuso, senza rami pendenti.
+        6. Non hai più NESSUN tool da invocare: non ci sono altre ricette madri da iniziare né sottoricette da risolvere.
 
 
         ####  REGOLA ANTI-LOOP E ABBANDONO RAMO

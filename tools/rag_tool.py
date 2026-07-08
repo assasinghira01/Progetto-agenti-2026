@@ -45,16 +45,16 @@ def cerca_ricetta_nel_db(query: str) -> str:
     CASO A - K-RAG PURO (Se hai estratto dati dal Knowledge Graph in precedenza):
     Se possiedi già una lista di ingredienti o claim recuperati dal grafo, la tua query DEVE
     contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici e tutti i claim recuperati.
-    Il procedimento tecnico deve contenere TUTTI i claim recuperati(senza modifiche).
+    nella sezione claims devono essere presenti TUTTI i claim attienti recuperati(senza modifiche).
 
     CASO B - HyDE FALLBACK (Se il Knowledge Graph era vuoto o non hai dati pregressi):
     Se il piatto è inedito, devi allucinare tu l'intero documento. La tua query DEVE contenere:
     1. Il nome del piatto.
-    2. Una lista coerente di ingredienti dedotti dalla tua conoscenza interna (es. se cerchi maionese: uova, olio, limone).
-    3. Un mini-procedimento tecnico discorsivo.
+    2. Nella sezione ingredienti una lista coerente di ingredienti dedotti dalla tua conoscenza interna (es. se cerchi maionese: uova, olio, limone).
+    3. Nella sezione claims un mini-procedimento tecnico discorsivo.
 
     ESEMPIO DI QUERY CORRETTA E RIGOROSA CHE DEVI EMULARE:
-     "Nome della ricetta completa". Ingredienti: "ingredienti estratti dal kg". Procedimento: "claim estratti dal kg combinati"
+     "Nome della ricetta completa". Ingredienti: "ingredienti estratti dal kg". claims: "claim estratti dal kg combinati"
 
     ESEMPIO DI QUERY ERRATA DA SCARTARE:
     "Ricetta della maionese con ingredienti e procedimento."

@@ -668,7 +668,7 @@ class CucinaKnowledgeGraph:
             return claims
 
     def get_claim_per_retrieval(
-        self, topic: str, soglia: float = 0.80, limite: int = 5
+        self, topic: str, soglia: float = 0.75, limite: int = 5
     ):
         """
         Recupera claim tecnici cercando DIRETTAMENTE nello spazio vettoriale

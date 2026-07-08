@@ -741,7 +741,7 @@ def krag_research_node(state: Blog_Cucina):
     1. Leggi attentamente ingredienti e procedimento.
     2. Applica il TEST DELLA SOTTORICETTA a ogni elemento complesso.
     3. Esito dell’analisi:
-    - **NESSUNA SOTTORICETTA**: dichiaralo esplicitamente nel think_tool: "Nessuna sottoricetta per [Nome Ricetta Madre]. Passo alla prossima Ricetta Madre (se esiste) o ai claim."
+    - **NESSUNA SOTTORICETTA**: dichiaralo esplicitamente nel think_tool: "Nessuna sottoricetta per [Nome Ricetta Madre]. Passo alla prossima Ricetta Madre o concludo se non ce ne sono altre."
     - **SOTTORICETTE TROVATE**: astrai il loro VERO NOME e, per OGNUNA di esse, esegui SUBITO la FASE 3 (ricerca). Solo dopo aver completato TUTTE le sottoricette di questa Ricetta Madre, puoi passare alla Ricetta Madre successiva.
   
 
