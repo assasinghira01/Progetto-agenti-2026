@@ -285,9 +285,8 @@ def observability_report(project_name: str = None, limit: int = 50) -> dict:
 def create_example_dataset():
     dataset_name = "BloggerCucina_Dataset_Test"
     examples = [
-        {"user_input": "Scrivi un post sulla Carbonara romana"},
+        {"user_input": "Scrivi un post sulla Carbonara"},
         {"user_input": "Vorrei una ricetta per il Tiramisù alle fragole"},
-        {"user_input": "Pianificazione automatica"},
         {"user_input": "Voglio una ricetta sulla margherita"},
         {"user_input": "Voglio un post sull'insalata russa"},
     ]

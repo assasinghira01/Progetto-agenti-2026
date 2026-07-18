@@ -136,8 +136,9 @@ def think_tool(
                 - **Preparazioni minime**: uova sode, ammolli (uvetta, funghi secchi), guarnizioni (granella, zucchero a velo).-> NO SOTTORICETTA
                 - **Bagne e sciroppi dolci**: bagna di fragole, bagna al caffè, sciroppo di zucchero, succo di frutta preparato al momento.-> NO SOTTORICETTA
                 - **ingredienti semplici**: Ingredienti sia crudi ma anche che subiscono una trasformazione(cottura) ma non hanno un identita culinaria propria non possono essere considerate delle sottoricette. -> NO SOTTORICETTA
-             esempi: melanzane fritte,funghi arrostiti, peperoni grigliati, olio, parmigiano, grnana padono, cioccolato, formaggio, pasta, riso, broccoli, verdure, manzo, tonno. -> NO SOTTORICETTA
+             🚨 esempi: melanzane fritte,funghi arrostiti, peperoni grigliati, olio, parmigiano, grnana padono, cioccolato, formaggio, pasta, riso, broccoli, verdure, manzo, tonno. -> NO SOTTORICETTA
          🚨REGOLA: è SEVERAMENTE VIETATO CONSIDERARE LA RICETTA MADRE STESSA O SUE VARIANTI COME SOTTORICETTA.
+         🚨NON ESEGUIRE IL TEST DELLA SOTTORICETTA ALLE SINGOLE SOTTORICETTE
          ⚠️ Se il test FALLISCE, consideralo un normale ingrediente. NON cercarlo come SOTTORICETTA.
          nel tuo `think_tool` se trovi una sottoricetta DEVI scrivere: ho trovato la sottoricetta x spiegando perche la consideri una sottoricetta
 
@@ -146,7 +147,7 @@ def think_tool(
         #LOOP DELLA SOTTORICETTA
             Per ogni singola sottoricetta individuata, DEVI seguire ESATTAMENTE questo ordine (è severamente vietato saltare i passaggi):
 
-            1. **CHECK 1 - KNOWLEDGE GRAPH (Obbligatorio e prioritario)**:
+            🚨1. **CHECK 1 - KNOWLEDGE GRAPH (Obbligatorio e prioritario)**:
             - Chiama il tool `get_ricetta_dal_grafo` passando il nome della sottoricetta.
             - ✅ Se TROVATA: la sottoricetta è RISOLTA. Memorizza i dati ufficiali del blog. NON cercare nel Vector DB e NON cercare sul Web. Torna alla FASE 2 (se ci sono altre sottoricette) o concludi.
             - ❌ Se NON TROVATA: vai al passaggio 2.
@@ -165,9 +166,9 @@ def think_tool(
             - ✅ Se TROVATA: memorizzala e torna alla FASE 2.
             - ❌ Se NON TROVATA: dichiara "FALLIMENTO SOTTORICETTA" e procedi con le altre.
 
-          🚨NON ESEGUIRE IL TEST DELLA SOTTORICETTA ALLE SINGOLE SOTTORICETTE
-          🚨UNA VOLTA TROVATA MEMORIZZA LA SOTTORICETTA E DICHIARA COCNLUSA LA RICERCA PER QUEST'UTLIMA
-                -NON RIPETERE PIU LA RICERCA PER QUESTA SOTTORICETTA PURE SE PRESENTE IN SUCCESSIVE RICETTE MADRI IN QUANTO L'HAI GIA ELABORATA
+
+          UNA VOLTA TROVATA MEMORIZZA LA SOTTORICETTA E DICHIARA COCNLUSA LA RICERCA PER QUEST'UTLIMA
+          🚨NON RIPETERE PIU LA RICERCA PER QUESTA SOTTORICETTA PURE SE PRESENTE IN SUCCESSIVE RICETTE MADRI IN QUANTO L'HAI GIA ELABORATA
           ⚠️ REGOLA ANTI-RITORNO: Dopo aver completato la ricerca di una sottoricetta (in uno qualsiasi degli step), torna alla FASE 2 per verificare se ci sono altre sottoricette per la STESSA Ricetta Madre. NON passare a una nuova Ricetta Madre finché non hai completato tutte le sottoricette di quella corrente.
 
 
@@ -241,17 +242,13 @@ def think_tool(
           sua esclusione.
         - Se non ci sono claim, procedi come al solito.
 
-        ▶ NEL CAMPO 'analisi_contesto' (FASE 1 & 2):
-            1. Eleggi la MIGLIORE "Ricetta Madre" tra tutti i documenti che parlano
-                del topic principale. Assegna a questa Score 1. Assegna Score 0 a tutte
-                le altre fonti della stessa ricetta (duplicati inferiori) anche si tratta di varianti della rticetta stessa.
-                - Se non trovi nessun documento pertinente per il topic dichiara fallimento e metti score 0 a tutti i documenti.
+        ▶ NEL CAMPO 'analisi_contesto'(FASE 1 & 2) :
+            1. l'argomento è il topic.
             2. considera come sottoricette solo quelle che provenogo prioritariamente dal reasoning_trace. Non elencare mai gli ingredienti, solo le preparazioni derivate.
             3. Se sono presenti CLAIM PERTINENTI DAL KNOWLEDGE GRAPH, confrontali con
-                la Ricetta Madre scelta: segnala eventuali conflitti e spiega perché
-                la ricetta rimane valida o deve essere declassata
+                i documenti forniti: segnala eventuali conflitti e motivali
 
-        ▶ NEL CAMPO 'valutazione_opzioni' (FASE 3):
+        ▶ NEL CAMPO 'valutazione_opzioni'(FASE 3):
             4. Prendi in esame TUTTI i documenti forniti, anche quelli che hai già
                 esaminato nella FASE 1. Devi esaminarli UNO PER UNO, seguendo l'ordine
                 esatto degli ID (DB_DOC_0, DB_DOC_1, ..., WEB_DOC_0, ...).
@@ -260,21 +257,26 @@ def think_tool(
                 un documento con indice uguale al conteggio totale: se una sezione ha
                 2 documenti, gli unici ID validi sono _0 e _1, MAI _2.
                 Per ciascun documento:
+            5.  Eleggi la MIGLIORE "Ricetta Madre" tra tutti i documenti che parlano
+                del topic principale. Assegna a questa Score 1. Assegna Score 0 a tutte
+                le altre fonti della stessa ricetta (duplicati inferiori) anche si tratta di varianti della rticetta stessa.
+                - Se non trovi nessun documento pertinente per il topic dichiara fallimento e metti score 0 a tutti i documenti.
+            6. dopo aver eletto la ricetta madre passa ai restanti documenti:
                 - Se è una sottoricetta necessaria (secondo quanto emerso dalla Ricetta
                 Madre), assegna Score 1 al migliore (in caso di duplicati) e
                 Score 0 agli altri duplicati inferiori.
                 - Se il documento è irrilevante, fuori tema o non serve, assegna Score 0 con motivazione esplicita
 
-            5. **NON PUOI SALTARE NESSUN DOCUMENTO**. Ogni ID che ti è stato fornito
+            7. **NON PUOI SALTARE NESSUN DOCUMENTO**. Ogni ID che ti è stato fornito
                 deve comparire nella valutazione e poi nell'elenco finale.
 
         ▶ NEL CAMPO 'decisione_finale' (VERDETTO):
-            6. Scrivi l'elenco FISICO ED ESATTO di TUTTI i documenti valutati,
+            8. Scrivi l'elenco FISICO ED ESATTO di TUTTI i documenti valutati,
                 uno per riga, nel formato obbligatorio:
                 ID_DOC [TITOLO]: Score X - Motivo: ...
-            7. L'elenco DEVE contenere ESATTAMENTE il numero di documenti che ti sono
+            9. L'elenco DEVE contenere ESATTAMENTE il numero di documenti che ti sono
                 stati forniti. Non puoi ometterne nessuno.
-            8. Rispetta rigorosamente l'ordine e gli ID originali con cui i documenti
+            10. Rispetta rigorosamente l'ordine e gli ID originali con cui i documenti
                 ti sono stati presentati (es. DB_DOC_0, DB_DOC_1, WEB_DOC_0, WEB_DOC_1).
                 🚨 REGOLA CRITICA SU ID_DOC (controllata a valle da codice automatico):
                 L'ID che scrivi in ogni riga DEVE essere ESATTAMENTE il numero N copiato
@@ -285,14 +287,13 @@ def think_tool(
                 letteralmente dall'etichetta. Esempio corretto: se il secondo documento web
                 ti è stato presentato come "WEB_DOC_1", la riga corrispondente inizia con
                 "WEB_DOC_1", MAI con "WEB_DOC_2".
-            9. **Prima di scrivere "STATO: FINITO", conta le righe del tuo elenco e
+            11. **Prima di scrivere "STATO: FINITO", conta le righe del tuo elenco e
                 verifica che corrispondano al numero totale di documenti indicato all'inizio.**
-            10. Subito dopo l'ultima riga, scrivi "STATO : FINITO validazione completata" .
+            12. Subito dopo l'ultima riga, scrivi "STATO : FINITO validazione completata" .
 
         RICORDA: Omettere un documento è un ERRORE CRITICO. Anche i documenti con
         Score 0 devono apparire nella lista.
         Non usare mai "STATO: CONTINUO" in questa fase. dimmi i punti dove inserire le correzioni
-
 
     Args:
         analisi_contesto: La tua analisi dei dati.

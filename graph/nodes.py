@@ -812,6 +812,7 @@ def krag_research_node(state: Blog_Cucina):
     - Se non trovi nessuna sottoricetta.
     - Quando tutte le sottoricette di una Ricetta Madre sono risolte o abbandonate, la Ricetta Madre è completa.
     - Se ci sono più Ricette Madri (più ricette sullo stesso topic), processale una alla volta.
+    - se non trovi la ricetta madre dopo una ricerca.
     - Solo quando **tutto** è stato completato, invoca `think_tool` con “STATO: FINITO”.
 
     ---
@@ -879,6 +880,8 @@ def validator_node(state: Blog_Cucina):
     riflessioni_research = [r for r in ragionamento if r.startswith("[RESEARCH]")]
     dati_db_locale = state.get("rag_documents", [])
     dati_web_grezzi = state.get("web_documents", [])
+    print(f"{len(dati_db_locale)}")
+    print(f"{len(dati_web_grezzi)}")
     messaggi = state.get("messages", [])
     totale_doc = len(dati_db_locale) + len(dati_web_grezzi)
 
@@ -957,19 +960,9 @@ def validator_node(state: Blog_Cucina):
         
                 ▶ NEL CAMPO 'analisi_contesto' (ESEGUI FASE 1 e FASE 2 INSIEME ADESSO):
         
-                - Confronta TUTTI i documenti che trattano '{topic}'.
-                - Eleggi il MIGLIORE come "Ricetta Madre" (assegnali SCORE 1) in base al punteggio o all'autorevolezza.
-                - Assegna SCORE 0 a tutti gli altri documenti che parlano dello topic o di sue varianti '{topic}' (sono duplicati inferiori).
-                - Se non trovi nessun documento pertinente per il '{topic}' dichiara fallimento e prosegui
-                - Analizzando i tuoi ragionamenti precedenti {riflessioni_research} individua le sottoricette approvate dal validator che sono strettamente necessarie per realizzarla (non citare gli ingredienti).
+                - l'argomento principale è il {topic}'.
+                - Analizzando i tuoi ragionamenti precedenti {riflessioni_research} individua le che sono strettamente necessarie per realizzarla ed elencale una ad una (non citare gli ingredienti).
                 - DEVI SOLO CONSIDERARE COME SOTTORICETTE della ricetta madre quelle presenti in {riflessioni_research}.
-                - Per ciascuna sottoricetta individuata, verifica se ESISTE tra i documenti forniti
-                    (DB o WEB) uno che la tratti specificamente con ingredienti e procedimento propri.
-                    Se NESSUN documento fornito tratta quella sottoricetta, dichiaralo esplicitamente
-                    (es. "sottoricetta 'Maionese' necessaria ma non reperita in nessun documento
-                    fornito") — questo segnale è OBBLIGATORIO ed evita che il post finale contenga
-                    dati inventati per quella sottoricetta.
-                
                 -verificare la coerenza con i claim esistenti  {claim_text}.
                 -Se un claim contraddice la ricetta o le sottoricette, segnalalo nel `think_tool`.
                 - Nel `think_tool` DEVI SEMPRE indicare quanti claim hai trovato e se sono coerenti o in conflitto con la ricetta.
@@ -977,7 +970,11 @@ def validator_node(state: Blog_Cucina):
                 - se non ci sono claim contraddittori, dichiara: "nessuna contraddizione trovata. La ricetta è valida!".
         
                 ▶ NEL CAMPO 'valutazione_opzioni' (ESEGUI FASE 3 ADESSO):
-                - Prendi i documenti RIMASTI (quelli non ancora eletti o scartati).  -
+                - Analizza tutti i documenti.
+                  Confronta INIZIALMENTE SOLO i documenti che trattano '{topic}'.
+                  Eleggi il MIGLIORE come "Ricetta Madre" (assegnali SCORE 1) in base al punteggio o all'autorevolezza.
+                - Assegna SCORE 0 a tutti gli altri documenti che parlano dello topic o di sue varianti '{topic}' (sono duplicati inferiori).
+                  DOPO AVER ELETTO LA RICETTA madre analizza i restanti documenti:
                 - SE il documento è una sottoricetta della ricetta madre: ASSEGNA Score 1 al migliore e scarta gli altri assegandoli Score 0(sono duplicati inferiori).
                 - SE il documento è irrilevante,fuori tema o non serve: assegna SCORE 0.
         

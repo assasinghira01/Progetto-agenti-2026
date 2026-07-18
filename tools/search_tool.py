@@ -128,6 +128,12 @@ def esegui_ricerca_web(query: str) -> str:
         country="it",
     )
     risultati_grezzi = tool_tavily.invoke({"query": query})
+    if isinstance(risultati_grezzi, str):
+        print(f"[Web Tool] Tavily ha restituito un errore: {risultati_grezzi}")
+        return "Nessuna ricetta di qualità sufficiente trovata (ricerca web fallita)."
+
+    if not risultati_grezzi:
+        return "Nessuna ricetta di qualità sufficiente trovata."
 
     # 3. Re-Ranking con Cohere
     # Prepariamo i documenti per il reranker usando lo snippet di testo fornito da Tavily
