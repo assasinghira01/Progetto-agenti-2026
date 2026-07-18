@@ -153,7 +153,15 @@ def evaluate_grounding(run, example) -> dict:
     if not generated_post:
         return {"key": "Source_Grounding", "score": 0.0, "comment": "Nessuna bozza."}
     low = generated_post.lower()
-    citation_markers = ["http", "**fonti utilizzate**", "fonti utilizzate:"]
+    citation_markers = [
+        "http",
+        "**fonti utilizzate**",
+        "fonti utilizzate:",
+        "[fonte",
+        "fonti:",
+        "secondo",
+        "riferimenti",
+    ]
     has_citations = any(m in low for m in citation_markers)
     cit_score = 1.0 if has_citations else 0.0
     prompt = (
