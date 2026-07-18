@@ -56,9 +56,8 @@ def controlla_storico_post(topic: str) -> str:
 @tool
 def get_ingredienti(nome_ricetta: str) -> str:
     """
-    Interroga il Knowledge Graph per estrarre gli ingredienti principali del piatto bloccato.
-    Analizzando questi ingredienti nel tuo think_tool, potrai decidere in autonomia se
-    creare una 'Variante' o una 'Ricetta Simile'.
+    Interroga il Knowledge Graph per estrarre gli ingredienti di una ricetta.
+
     """
     ingredienti = kg_client.espandi_query_per_krag(nome_ricetta)
 
@@ -84,7 +83,7 @@ def get_claim_pertinenti(topic: str) -> str:
         claims = kg_client.get_claim_pertinenti(topic)
         if not claims:
             print("[TOOL] Nessun claim trovato.")
-            return "NESSUN_CLAIM: Nessun claim pertinente trovato nel Knowledge Graph."
+            return ""
 
         risultato = "=== CLAIM PERTINENTI ===\n"
         for i, c in enumerate(claims, 1):
@@ -104,7 +103,7 @@ def get_claim_per_retrieval(nome_elemento: str) -> str:
         claims = kg_client.get_claim_per_retrieval(nome_elemento)
         if not claims:
             print("[TOOL] Nessun claim tecnico trovato.")
-            return "NESSUN_CLAIM_TECNICO"
+            return f"NESSUN_CLAIM_TECNICO trovato nel grafo per {nome_elemento}. Sii creativo."
 
         risultato = "=== CLAIM TECNICI PERTINENTI ===\n"
         for i, c in enumerate(claims, 1):
@@ -121,21 +120,23 @@ def get_claim_per_retrieval(nome_elemento: str) -> str:
 def get_ricetta_dal_grafo(nome_elemento: str) -> str:
     """
     Verifica se una ricetta o sottoricetta è già stata pubblicata dal blog
-    e ne recupera gli ingredienti con le dosi esatte già usate.
+    e ne recupera gli ingredienti (con le dosi esatte) e il procedimento.
 
     USA QUESTO TOOL come PRIMO CHECK prima di cercare nel DB locale
     o sul web. Se il blog ha già pubblicato questa preparazione,
-    le dosi qui presenti sono quelle ufficiali del blog — usale
+    i dati qui presenti sono quelli ufficiali del blog — usali
     direttamente senza cercare altre fonti per garantire coerenza.
 
     Args:
         nome_elemento: Il nome della ricetta o sottoricetta da cercare.
     """
+    print(f"[TOOL] get_ricetta_dal_grafo chiamato per: '{nome_elemento}'")
     risultato = kg_client.get_ricetta_completa_da_grafo(nome_elemento)
 
     if not risultato:
         return f"ASSENTE_DAL_GRAFO: '{nome_elemento}' non è ancora nel blog. Procedi con DB locale o web."
 
+    # Formattazione degli ingredienti
     ingredienti_str = "\n".join(
         [
             f"  - {ing['nome']}: {ing['quantita']}"
@@ -144,9 +145,28 @@ def get_ricetta_dal_grafo(nome_elemento: str) -> str:
         ]
     )
 
-    return (
-        f"TROVATA_NEL_GRAFO: '{risultato['ricetta']}' è già stata pubblicata dal blog.\n"
-        f"USA QUESTI INGREDIENTI — sono quelli ufficiali del blog:\n"
-        f"{ingredienti_str}\n"
-        f"NON cercare questa preparazione altrove: i dati sopra sono già validati."
+    # Estrazione procedimento e fonte
+    procedimento_str = risultato.get(
+        "procedimento", "Nessun procedimento testuale trovato."
     )
+    fonti_str = ", ".join(risultato.get("fonti", ["Knowledge Graph Locale"]))
+
+    # Testo finale da passare all'LLM
+    messaggio_finale = (
+        f"TROVATA_NEL_GRAFO: '{risultato['ricetta']}' è già stata pubblicata dal blog.\n"
+        f"USA QUESTI DATI — sono quelli ufficiali del blog:\n"
+        f"--- INGREDIENTI ---\n"
+        f"{ingredienti_str}\n"
+        f"--- PROCEDIMENTO ---\n"
+        f"{procedimento_str}\n"
+        f"--- FONTE DA CITARE ---\n"
+        f"{fonti_str}\n"
+        f"-------------------\n"
+        f"NON cercare questa preparazione altrove e NON inventare passaggi. "
+        f"RICORDA: Inserisci rigorosamente la FONTE DA CITARE nell'elenco 'fonti' finale."
+    )
+
+    # Stampiamo a schermo per il debug
+    print(f"[TOOL] Risultato inviato all'agente:\n{messaggio_finale}")
+
+    return messaggio_finale

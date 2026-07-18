@@ -9,7 +9,9 @@ class TopicPianificato(BaseModel):
 
     categoria: Literal[
         "Antipasto", "Primo", "Secondo", "Contorno", "Dolce", "Salse e Condimenti"
-    ] = Field(description="La categoria gastronomica del piatto.")
+    ] = Field(
+        description="La categoria gastronomica del piatto. Analizza il piatto è indidua la sua categoria in base alle fonti e alla natura gastronomica del piatto"
+    )
 
     giustificazione: Optional[str] = Field(
         default="",
@@ -86,6 +88,17 @@ class SottoRicetta(BaseModel):
     ingredienti: list[Ingrediente] = Field(
         description="Tutti e soli gli ingredienti necessari per questa specifica preparazione."
     )
+    procedimento: str = Field(
+        description="Il procedimento tecnico ESTESO e dettagliato per realizzare ESCLUSIVAMENTE questa "
+        "sottoricetta (es. solo i passaggi della besciamella, non dell'intera ricetta madre). "
+        "Deve essere autosufficiente: qualcuno che leggesse solo questo testo deve poter "
+        "riprodurre la preparazione. È severamente vietato riassumere o omettere passaggi."
+    )
+    categoria: Literal[
+        "Antipasto", "Primo", "Secondo", "Contorno", "Dolce", "Salse e Condimenti"
+    ] = Field(
+        description="La categoria gastronomica del piatto. Analizza il piatto è indidua la sua categoria in base alle fonti e alla natura gastronomica del piatto"
+    )
 
     @field_validator("nome_specifico", "classe_astratta")
     @classmethod
@@ -99,6 +112,13 @@ class RecipeDraft(BaseModel):
     titolo: str = Field(
         description="Titolo accattivante per il post, con la PRIMA LETTERA MAIUSCOLA (es. 'Lasagne alla bolognese')."
     )
+
+    categoria: Literal[
+        "Antipasto", "Primo", "Secondo", "Contorno", "Dolce", "Salse e Condimenti"
+    ] = Field(
+        description="La categoria gastronomica del piatto. Analizza il piatto è indidua la sua categoria in base alle fonti e rimanendo fedele alla natura gastronomica del piatto"
+    )
+
     introduzione: str = Field(description="Breve introduzione discorsiva")
     sotto_ricette: list[SottoRicetta] = Field(
         description="Eventuali preparazioni individuate nella ricetta madre che fungono da ulteriore ricetta autonoma (es. Ragù, Besciamella, Creme). "
@@ -111,7 +131,6 @@ class RecipeDraft(BaseModel):
         description="Elenco esteso e dettagliato di tutti i passaggi della ricetta. Ogni passaggio logico deve essere una stringa separata nella lista. È severamente vietato riassumere."
     )
 
-    # [MODIFICA QUI] Da stringa singola a lista di stringhe
     fonti: list[str] = Field(
         description="Elenco di TUTTI gli URL o i percorsi dei file usati per scrivere questo post (Ricetta Madre e tutte le Sottoricette). Inserisci ogni fonte in una stringa separata della lista."
     )

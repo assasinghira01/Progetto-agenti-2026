@@ -118,16 +118,16 @@ def ottimizza_query_ricerca(query_originale: str) -> str:
 @tool
 def esegui_ricerca_web(query: str) -> str:
     """Cerca, riordina con AI e infine estrae solo le migliori ricette."""
-    query_ottimizzata = ottimizza_query_ricerca(query)
+    # query_ottimizzata = ottimizza_query_ricerca(query)
     # 2. Retrieval iniziale (più ampio: 10 risultati)
     print(f"\n[Web Tool] Query originale: '{query}'")
-    print(f"[Web Tool] Query ottimizzata: '{query_ottimizzata}'\n")
+    # print(f"[Web Tool] Query ottimizzata: '{query_ottimizzata}'\n")
     tool_tavily = TavilySearchResults(
         max_results=10,
         exclude_domains=DOMINI_SPAZZATURA,
         country="it",
     )
-    risultati_grezzi = tool_tavily.invoke({"query": query_ottimizzata})
+    risultati_grezzi = tool_tavily.invoke({"query": query})
 
     # 3. Re-Ranking con Cohere
     # Prepariamo i documenti per il reranker usando lo snippet di testo fornito da Tavily
@@ -135,7 +135,7 @@ def esegui_ricerca_web(query: str) -> str:
 
     print(f"[Web Tool] Re-ranking di {len(risultati_grezzi)} risultati...")
     rerank_results = co.rerank(
-        query=query_ottimizzata,
+        query=query,
         documents=doc_snippets,
         model="rerank-multilingual-v3.0",
         top_n=5,  # Estraiamo solo i 3 migliori

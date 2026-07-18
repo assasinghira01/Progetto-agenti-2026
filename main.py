@@ -187,7 +187,7 @@ def main():
         print(" FLUSSO TERMINATO SENZA PUBBLICAZIONE 🛑")
         print("==============================================")
         print(
-            "Il processo è stato interrotto dal Validatore per incoerenza dei dati o mancanza di fonti."
+            "Il processo è stato interrotto dall'utente o dal validator per incoerenza dei dati o mancanza di fonti."
         )
 
     print("\nResta sempre collegato con noi!!")

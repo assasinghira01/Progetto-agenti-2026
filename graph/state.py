@@ -21,6 +21,7 @@ class Blog_Cucina(MessagesState):
     richiede_variante: Optional[bool] = None
     kg_context: Annotated[List[str], operator.add]
     rag_documents: Annotated[List[str], replace_or_add]
+    kg_documents: Annotated[List[str], replace_or_add]
     web_documents: Annotated[List[str], replace_or_add]
     approved_web_documents: list[str]
     approved_db_documents: list[str]

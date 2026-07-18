@@ -1,10 +1,9 @@
 import json
 from typing import Literal
-
 from langgraph.graph import StateGraph, START, END
 from graph.schemas import PianoEditoriale, TopicPianificato
 from graph.state import Blog_Cucina
-from langchain_core.messages import AIMessage, RemoveMessage, ToolMessage
+from langchain_core.messages import RemoveMessage, ToolMessage
 from config import llm
 from graph.nodes import (
     human_review_variante,
@@ -17,7 +16,7 @@ from graph.nodes import (
     human_review_planner,
 )
 from langgraph.checkpoint.memory import InMemorySaver
-from config import lista_tools  #
+from config import lista_tools
 
 # --- 1. IL NODO DEGLI STRUMENTI ---
 
@@ -32,6 +31,7 @@ def smista_documenti_node(state: Blog_Cucina):
 
     rag_docs = []
     web_docs = []
+    kg_docs = []
 
     for msg in messaggi:
         if getattr(msg, "type", "") == "tool":
@@ -45,6 +45,13 @@ def smista_documenti_node(state: Blog_Cucina):
                     except json.JSONDecodeError:
                         pass
 
+            elif msg.name == "get_ricetta_dal_grafo":
+                if "TROVATA_NEL_GRAFO" in msg.content:
+                    kg_docs.append(msg.content)
+                    print(
+                        "[SMISTAMENTO] Dati estratti dal Grafo (bypassano il validatore)."
+                    )
+
             elif msg.name == "esegui_ricerca_web":
                 if "Nessuna ricetta" not in msg.content:
                     lista_ricette_web = msg.content.split("\n\n|||SPLIT_DOC|||\n\n")
@@ -57,6 +64,7 @@ def smista_documenti_node(state: Blog_Cucina):
     return {
         "rag_documents": rag_docs,
         "web_documents": web_docs,
+        "kg_documents": kg_docs,
         "messages": messaggi_da_cancellare,
         "is_rigenera": False,
     }
@@ -125,7 +133,6 @@ def estrai_piano_node(state: Blog_Cucina):
 def estrai_singolo_topic_node(state: Blog_Cucina):
     print("\n--- [NODO: ESTRAZIONE TOPIC / GESTIONE FEEDBACK] ---")
     is_variante = False
-    input_utente = state.get("input_utente")
     storico_riflessioni = state.get("reasoning_trace", [])
     testo_ragionamenti = "\n".join(storico_riflessioni)
     topic_iniziale = state.get("topic_corrente")
@@ -481,8 +488,12 @@ builder.add_conditional_edges(
     },
 )
 
+# --------------------nel caso di avvio normale-----------------------------
 memoria_temporanea = InMemorySaver()
 app = builder.compile(checkpointer=memoria_temporanea)
-
 # with open("diagramma_agente.png", "wb") as f:
 # f.write(app.get_graph().draw_mermaid_png())
+
+
+# --------------------caso di avvio su langsmith-----------------------------
+# app = builder.compile()

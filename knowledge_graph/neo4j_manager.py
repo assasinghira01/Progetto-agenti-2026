@@ -3,7 +3,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from neo4j import GraphDatabase
 from datetime import datetime
 from langchain_core.messages import HumanMessage
-from regex import sub
+
+# from regex import sub
 
 
 class CucinaKnowledgeGraph:
@@ -18,6 +19,7 @@ class CucinaKnowledgeGraph:
         # Creiamo l'indice vettoriale
         self._crea_indice_vettoriale()
         self._crea_indice_claim()
+        self._crea_indice_procedimento()
 
     def _crea_indice_vettoriale(self):
         """Prepara il database a grafo per la ricerca semantica."""
@@ -52,6 +54,26 @@ class CucinaKnowledgeGraph:
         with self.driver.session() as session:
             session.run(query)
             print(" [NEO4J] Indice 'claim_embedding_index' verificato/creato.")
+
+    def _crea_indice_procedimento(self):
+        """
+        Indice vettoriale sul testo del procedimento salvato sui nodi Ricetta
+        (sia ricetta madre che sottoricette, es. besciamella, ragù).
+        Usato da get_procedimento_per_retrieval per il K-RAG: al contrario
+        dei claim (riassunti brevi), il procedimento preserva dettagli tecnici
+        (tempi, sequenza, trasformazioni) utili a una query HyDE densa.
+        """
+        query = """
+        CREATE VECTOR INDEX procedimento_embedding_index IF NOT EXISTS
+        FOR (r:Ricetta) ON (r.procedimento_embedding)
+        OPTIONS {indexConfig: {
+          `vector.dimensions`: 1024,
+          `vector.similarity_function`: 'cosine'
+        }}
+        """
+        with self.driver.session() as session:
+            session.run(query)
+            print(" [NEO4J] Indice 'procedimento_embedding_index' verificato/creato.")
 
     def init_blog_style(
         self,
@@ -294,9 +316,9 @@ class CucinaKnowledgeGraph:
 
     def get_ricetta_completa_da_grafo(self, topic: str) -> dict | None:
         """
-        Recupera ingredienti CON DOSI di una sottoricetta già salvata.
-        Se trovata, permette di ricostruire la ricetta senza andare sul web,
-        garantendo coerenza con quanto già pubblicato dal blog.
+        Recupera ingredienti CON DOSI e PROCEDIMENTO di una ricetta già salvata.
+        Se trovata, permette di ricostruire la ricetta senza andare sul web.
+        Restituisce anche la fonte impostata su "Knowledge Graph".
         """
         vettore = self.embeddings.embed_query(topic.strip())
 
@@ -305,13 +327,16 @@ class CucinaKnowledgeGraph:
         YIELD node AS r, score
         WHERE score > 0.90
         MATCH (r)-[rel:CONTIENE]->(i:Ingrediente)
+        MATCH (r)-[:HA_PROCEDIMENTO]->(proc:Procedimento)
+        
         RETURN r.name AS ricetta,
-            score,
-            collect({
-                nome: i.name,
-                quantita: rel.quantita,
-                fase: rel.fase
-            }) AS ingredienti
+               proc.testo AS procedimento,
+               score,
+               collect({
+                   nome: i.name,
+                   quantita: rel.quantita,
+                   fase: rel.fase
+               }) AS ingredienti
         LIMIT 1
         """
 
@@ -319,15 +344,17 @@ class CucinaKnowledgeGraph:
             risultato = session.run(query, vettore=vettore)
             record = risultato.single()
 
-            if record and record["ingredienti"]:
+            if record and record.get("ingredienti") and record.get("procedimento"):
                 print(
                     f"[NEO4J] Ricetta '{record['ricetta']}' trovata nel grafo "
-                    f"(score: {record['score']:.2f}) — uso dosi storiche del blog."
+                    f"(score: {record['score']:.2f}) — uso dati storici del blog."
                 )
                 return {
                     "ricetta": record["ricetta"],
+                    "procedimento": record["procedimento"],
                     "ingredienti": record["ingredienti"],
                     "score": record["score"],
+                    "fonti": ["Knowledge Graph"],
                 }
 
         return None
@@ -341,13 +368,20 @@ class CucinaKnowledgeGraph:
         fonte: list[str] | None = None,
         testo_post: str = "",
         llm=None,
+        procedimento_principale: str | None = None,
+        categoria: str | None = None,
+        data_pubblicazione: datetime | None = None,
     ):
         ingredienti_diretti = ingredienti_diretti or []
         sotto_ricette = sotto_ricette or []
 
         op_madre = topic_originale.strip().lower()
         op_finale = topic_finale.strip().lower()
-        data_oggi = datetime.now().strftime("%Y-%m-%d")
+        data_oggi = (
+            data_pubblicazione.strftime("%Y-%m-%d")
+            if data_pubblicazione
+            else datetime.now().strftime("%Y-%m-%d")
+        )
         titolo_post = f"Post su {op_finale} - {data_oggi}"
 
         is_variante = op_madre.lower() != op_finale.lower()
@@ -378,6 +412,7 @@ class CucinaKnowledgeGraph:
  
                     MERGE (variante:Ricetta { name: $topic_finale })
                     SET variante.embedding = $vettore_finale
+                    SET variante.categoria = $categoria
  
                     MERGE (variante)-[:IS_VARIANTE_DI]->(madre)
  
@@ -390,6 +425,7 @@ class CucinaKnowledgeGraph:
                     titolo=titolo_post,
                     data=data_oggi,
                     vettore_madre=vettore_madre,
+                    categoria=categoria,
                     vettore_finale=vettore_finale,
                 )
 
@@ -412,6 +448,7 @@ class CucinaKnowledgeGraph:
  
                     MERGE (r:Ricetta { name: $topic_originale })
                     SET r.embedding = $vettore_madre
+                    SET r.categoria = $categoria
  
                     CREATE (p:Post { titolo: $titolo, data: $data })
                     MERGE (b)-[:HA_PUBBLICATO]->(p)
@@ -420,6 +457,7 @@ class CucinaKnowledgeGraph:
                     topic_originale=op_madre,
                     titolo=titolo_post,
                     data=data_oggi,
+                    categoria=categoria,
                     vettore_madre=vettore_madre,
                 )
 
@@ -433,6 +471,34 @@ class CucinaKnowledgeGraph:
                 )
                 print(f"[NEO4J] Ricetta standard '{op_madre}' salvata con vettori.")
 
+            # ==================================================
+            # PROCEDIMENTO DELLA RICETTA PRINCIPALE
+            # ==================================================
+
+            if procedimento_principale and procedimento_principale.strip():
+                vettore_procedimento_madre = self.embeddings.embed_query(
+                    procedimento_principale.strip()
+                )
+                session.run(
+                    """
+                 
+                    MATCH (r:Ricetta { name: $topic_finale })
+                    
+                    MERGE (proc:Procedimento { id_ricetta: $topic_finale })
+                    ON CREATE SET 
+                        proc.testo = $procedimento,
+                        proc.embedding = $embedding
+                    
+                 
+                    MERGE (r)-[:HA_PROCEDIMENTO]->(proc)
+                    """,
+                    topic_finale=op_finale,
+                    procedimento=procedimento_principale.strip(),
+                    embedding=vettore_procedimento_madre,
+                )
+                print(
+                    f"[NEO4J] Nodo Procedimento creato e collegato per '{op_finale}'."
+                )
             # ==================================================
             # INGREDIENTI DIRETTI
             # ==================================================
@@ -453,7 +519,8 @@ class CucinaKnowledgeGraph:
  
                     MERGE (r)-[rel:CONTIENE]->(i)
  
-                    SET rel.quantita = ing.quantita
+                    SET rel.quantita = coalesce(rel.quantita, ing.quantita)
+                    SET rel.fase = coalesce(rel.fase, ing.fase_utilizzo)
                     """,
                     topic_finale=op_finale,
                     ingredienti=ingredienti_diretti,
@@ -472,6 +539,7 @@ class CucinaKnowledgeGraph:
             for sub in sotto_ricette:
                 sub_classe = sub["classe_astratta"].strip().lower()
                 sub_nome = sub["nome_specifico"].strip().lower()
+                sub_categoria = sub["categoria"].strip().lower()
 
                 # Calcolo embedding
                 vettore_specifico = self.embeddings.embed_query(sub_nome)
@@ -488,12 +556,14 @@ class CucinaKnowledgeGraph:
                     SET madre_sub.embedding = $v_astratto  
                     MERGE (specifica_sub:Ricetta { name: $nome_specifico })
                     SET specifica_sub.embedding = $v_specifico  
+                    SET specifica_sub.categoria =$categoria
                     MERGE (main)-[:USA_PREPARAZIONE]->(specifica_sub)
                     """,
                     topic_finale=op_finale,
                     nome_specifico=sub_nome,
                     classe_astratta=sub_classe,
                     v_specifico=vettore_specifico,
+                    categoria=sub_categoria,
                     v_astratto=vettore_astratto,
                 )
 
@@ -510,7 +580,37 @@ class CucinaKnowledgeGraph:
                     print(
                         f"[NEO4J] Registrata variante interna: '{sub_nome}' -> '{sub_classe}'"
                     )
+
+                    # ==================================================
+                    # PROCEDIMENTO DELLA SOTTORICETTA
+                    # ==================================================
+
+                procedimento_sub = sub.get("procedimento")
+
+                if procedimento_sub and procedimento_sub.strip():
+                    vettore_procedimento_sub = self.embeddings.embed_query(
+                        procedimento_sub.strip()
+                    )
+                    session.run(
+                        """
+                        MATCH (specifica_sub:Ricetta { name: $nome_specifico })
+                        MERGE (proc:Procedimento { id_ricetta: $nome_specifico })
+                        ON CREATE SET
+                            proc.testo = $procedimento,
+                            proc.embedding = $embedding
+                        MERGE (specifica_sub)-[:HA_PROCEDIMENTO]->(proc)
+                        """,
+                        nome_specifico=sub_nome,
+                        procedimento=procedimento_sub.strip(),
+                        embedding=vettore_procedimento_sub,
+                    )
+                    print(
+                        f"[NEO4J] Procedimento creato/verificato e collegato "
+                        f"per la sottoricetta '{sub_nome}'."
+                    )
+
                 #  SALVATAGGIO INGREDIENTI SOTTORICETTA -----
+
                 ingredienti_sub = sub.get("ingredienti", [])
                 if ingredienti_sub:
                     session.run(
@@ -519,8 +619,8 @@ class CucinaKnowledgeGraph:
                             UNWIND $ingredienti AS ing
                             MERGE (i:Ingrediente { name: toLower(trim(ing.nome)) })
                             MERGE (specifica_sub)-[rel:CONTIENE]->(i)
-                            SET rel.quantita = ing.quantita
-                            SET rel.fase = ing.fase_utilizzo
+                            SET rel.quantita = coalesce(rel.quantita, ing.quantita)
+                            SET rel.fase = coalesce(rel.fase, ing.fase_utilizzo)
                             """,
                         nome_specifico=sub_nome,
                         ingredienti=ingredienti_sub,
@@ -631,7 +731,7 @@ class CucinaKnowledgeGraph:
 
         return []
 
-    def get_claim_pertinenti(self, topic: str, soglia: float = 0.62, limite: int = 5):
+    def get_claim_pertinenti(self, topic: str, soglia: float = 0.70, limite: int = 5):
         """
         Recupera i claim più semanticamente vicini al topic dal Knowledge Graph.
         """
@@ -668,7 +768,7 @@ class CucinaKnowledgeGraph:
             return claims
 
     def get_claim_per_retrieval(
-        self, topic: str, soglia: float = 0.75, limite: int = 5
+        self, topic: str, soglia: float = 0.78, limite: int = 5
     ):
         """
         Recupera claim tecnici cercando DIRETTAMENTE nello spazio vettoriale
@@ -683,7 +783,7 @@ class CucinaKnowledgeGraph:
             perché il loro testo parla di tecniche usate nei Cannelloni)
 
         Usato nel research node per arricchire la query HyDE prima del retrieval
-        su ChromaDB. Soglia più alta (0.72) perché qui vogliamo precisione,
+        su ChromaDB. Soglia più alta (0.78) perché qui vogliamo precisione,
         non ampiezza.
 
         Args:
@@ -728,6 +828,22 @@ class CucinaKnowledgeGraph:
                 f"trovati per '{topic}' (ricerca diretta sui claim)."
             )
             return claims
+
+    def get_ultima_data_pubblicazione(self):
+
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (p:Post)
+                WHERE p.data IS NOT NULL
+                RETURN max(p.data) AS ultima_data
+            """)
+
+            record = result.single()
+
+            if record and record["ultima_data"]:
+                return datetime.strptime(record["ultima_data"], "%Y-%m-%d")
+
+        return None
 
     def __del__(self):
         """Si attiva automaticamente quando l'oggetto viene rimosso dalla memoria."""

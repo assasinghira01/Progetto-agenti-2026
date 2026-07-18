@@ -15,7 +15,9 @@ from tools.kg_tool import (
 load_dotenv()
 
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=1000)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1, max_tokens=1500)
+
+GIORNI_TRA_POST = 3  # cadenza editoriale: un post ogni N giorni
 
 
 # ---  BINDING DEGLI STRUMENTI (Pattern MCP) ---
@@ -28,8 +30,8 @@ lista_tools = [
     get_ingredienti,
     think_tool,
     get_claim_pertinenti,
-    get_claim_per_retrieval,
     get_ricetta_dal_grafo,
+    get_claim_per_retrieval,
 ]
 
 

@@ -36,34 +36,40 @@ def cerca_ricetta_nel_db(query: str) -> str:
     [AZIONE OBBLIGATORIA]
     Cerca una ricetta o preparazione base nel database vettoriale locale.
 
-    DIVIETO ASSOLUTO: Non usare MAI query brevi o parole generiche (es. vietato "Ricetta della maionese").
-    Devi generare un documento ipotetico denso di contesto (HyDE) per abbattere le distanze vettoriali.
+    DIVIETO ASSOLUTO: Non usare MAI query brevi o generiche (es. vietato "Ricetta del tiramisù").
+    Devi SEMPRE generare un documento ipotetico denso di contesto (HyDE) per abbattere le distanze vettoriali, rispettando TASSATIVAMENTE questo formato testuale:
 
-    ISTRUZIONI DI GENERAZIONE DELLA QUERY (K-RAG ibrido):
-    La tua query deve essere un paragrafo discorsivo generato seguendo rigorosamente UNA di queste due casistiche:
+    FORMATO DI QUERY OBBLIGATORIO:
+    "Ricetta completa per [NOME PIATTO]. Ingredienti: [LISTA INGREDIENTI SEPARATI DA VIRGOLA]. claims: [TUTTI I CLAIMS RECUPERATI]."
 
-    CASO A - K-RAG PURO (Se hai estratto dati dal Knowledge Graph in precedenza):
-    Se possiedi già una lista di ingredienti o claim recuperati dal grafo, la tua query DEVE
-    contenere il nome del piatto e utilizzare ESCLUSIVAMENTE quegli ingredienti storici e tutti i claim recuperati.
-    nella sezione claims devono essere presenti TUTTI i claim attienti recuperati(senza modifiche).
+    REGOLE DI COMPILAZIONE DELLA QUERY:
+    Scegli rigorosamente UNA delle due casistiche seguenti in base al tuo stato di conoscenza attuale.
 
-    CASO B - HyDE FALLBACK (Se il Knowledge Graph era vuoto o non hai dati pregressi):
-    Se il piatto è inedito, devi allucinare tu l'intero documento. La tua query DEVE contenere:
-    1. Il nome del piatto.
-    2. Nella sezione ingredienti una lista coerente di ingredienti dedotti dalla tua conoscenza interna (es. se cerchi maionese: uova, olio, limone).
-    3. Nella sezione claims un mini-procedimento tecnico discorsivo.
+    ▶ CASO A - K-RAG PURO (Hai recuperato dati dal Knowledge Graph):
+        Se nei passaggi precedenti hai estratto ingredienti e claims dal Grafo DEVI usare ESCLUSIVAMENTE quelli per riempire il Formato Obbligatorio.
+        - Ingredienti: inserisci SOLO gli ingredienti restituiti dal tool.
+        - claims: scrivi il testo unendo in modo discorsivo SOLO le azioni descritte in tutti i claims restituiti dal tool.
+        🚨 È SEVERAMENTE VIETATO allucinare o aggiungere ingredienti/passaggi estranei ai dati del Grafo.
+        🚨 È OBBLIGATORIO INCLUDERE TUTTI I CLAIMS TROVATI
 
-    ESEMPIO DI QUERY CORRETTA E RIGOROSA CHE DEVI EMULARE:
-     "Nome della ricetta completa". Ingredienti: "ingredienti estratti dal kg". claims: "claim estratti dal kg combinati"
 
-    ESEMPIO DI QUERY ERRATA DA SCARTARE:
-    "Ricetta della maionese con ingredienti e procedimento."
+    ▶ CASO B - HyDE FALLBACK (Il Knowledge Graph non ha restituito nulla):
+        Se i tool del grafo non hanno trovato ingredienti o claims per questo piatto, devi generare tu il documento ideale usando la tua conoscenza interna per facilitare il retrieval:
+        - Ingredienti: deduci e inserisci una lista realistica e coerente per il piatto.
+        - claims: inventa un mini-procedimento tecnico logico e verosimile.
+        - 🚨 È SEVERAMENTE VIETATO utilizzare per ingredienti:  "nessun dettaglio trovato nel grafo per topic" DEVI ALLUCINARE GLI INGREDIENTI
+        - 🚨 È SEVERAMENTE VIETATO utilizzare per claims: " Nessun claim tecnico trovato" DEVI ALLUCINARE I CLAIMS
+
+
+
+    ESEMPIO PRATICO DA EMULARE ALLA LETTERA:
+    "Ricetta completa per il tiramisù. Ingredienti: savoiardi, mascarpone, uova, zucchero, caffè, cacao amaro. claims: Montare i tuorli con lo zucchero e incorporare il mascarpone. Inzuppare i savoiardi nel caffè freddo, disporli a strati in una pirofila alternandoli con la crema al mascarpone, e infine spolverare la superficie con il cacao amaro."
     """
     if vector_store is None:
         return "Errore di sistema: Il database locale non è inizializzato."
 
     try:
-        SOGLIA_DISTANZA = 0.20
+        SOGLIA_DISTANZA = 0.22
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         documenti_recuperati = []

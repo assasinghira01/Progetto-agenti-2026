@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agente_editoriale": "./graph/workflow.py:app"
+  },
+  "env": ".env"
+}
