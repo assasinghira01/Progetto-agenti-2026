@@ -768,7 +768,7 @@ class CucinaKnowledgeGraph:
             return claims
 
     def get_claim_per_retrieval(
-        self, topic: str, soglia: float = 0.70, limite: int = 5
+        self, topic: str, soglia: float = 0.75, limite: int = 5
     ):
         """
         Recupera claim tecnici cercando DIRETTAMENTE nello spazio vettoriale
@@ -783,12 +783,12 @@ class CucinaKnowledgeGraph:
             perché il loro testo parla di tecniche usate nei Cannelloni)
 
         Usato nel research node per arricchire la query HyDE prima del retrieval
-        su ChromaDB. Soglia più alta (0.70) perché qui vogliamo precisione,
+        su ChromaDB. Soglia più alta (0.75) perché qui vogliamo precisione,
         non ampiezza.
 
         Args:
             topic: Il nome della ricetta o sottoricetta da cercare.
-            soglia: Soglia minima di similarità coseno (default 0.70).
+            soglia: Soglia minima di similarità coseno (default 0.75).
             limite: Numero massimo di claim da restituire (default 5).
 
         Returns:

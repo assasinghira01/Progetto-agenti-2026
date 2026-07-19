@@ -492,7 +492,7 @@ builder.add_conditional_edges(
 memoria_temporanea = InMemorySaver()
 app = builder.compile(checkpointer=memoria_temporanea)
 # with open("diagramma_agente.png", "wb") as f:
-# f.write(app.get_graph().draw_mermaid_png())
+#    f.write(app.get_graph().draw_mermaid_png())
 
 
 # --------------------caso di avvio su langsmith-----------------------------

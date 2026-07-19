@@ -69,7 +69,7 @@ def cerca_ricetta_nel_db(query: str) -> str:
         return "Errore di sistema: Il database locale non è inizializzato."
 
     try:
-        SOGLIA_DISTANZA = 0.22
+        SOGLIA_DISTANZA = 0.24
         risultati_con_distanza = vector_store.similarity_search_with_score(query, k=3)
 
         documenti_recuperati = []
